@@ -14,6 +14,7 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "DoodhOS - Milk Collection Center Management",
   description: "Premium SaaS for Milk Collection Centers",
+  manifest: "/manifest.json",
 };
 
 export default function RootLayout({
