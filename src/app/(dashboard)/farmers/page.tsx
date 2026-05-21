@@ -221,13 +221,11 @@ export default function FarmersPage() {
                       </td>
                       <td className="px-6 py-4 text-right">
                         <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <button
-                              className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors opacity-0 group-hover:opacity-100 outline-none"
-                              style={{ background: '#F0F0F0' }}
-                            >
-                              <MoreHorizontal size={15} style={{ color: '#555' }} />
-                            </button>
+                          <DropdownMenuTrigger
+                            className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-[#E5E5E5] outline-none"
+                            style={{ background: '#F0F0F0' }}
+                          >
+                            <MoreHorizontal size={15} style={{ color: '#555' }} />
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end" className="w-44 rounded-xl border-[#ECECEC] shadow-lg">
                             <DropdownMenuLabel className="text-[11px] text-[#AAAAAA] uppercase tracking-wider">Actions</DropdownMenuLabel>
