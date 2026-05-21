@@ -31,7 +31,7 @@ export default function AddFarmerPage() {
   const [isLoading, setIsLoading] = useState(false);
 
   const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<FarmerFormData>({
-    resolver: zodResolver(farmerSchema),
+    resolver: zodResolver(farmerSchema) as any,
     defaultValues: {
       name: '',
       mobile: '',
@@ -42,6 +42,7 @@ export default function AddFarmerPage() {
       ifscCode: '',
       aadhaarNumber: '',
       active: true,
+      balance: 0,
     },
   });
 
