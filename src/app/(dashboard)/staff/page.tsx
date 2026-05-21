@@ -32,7 +32,7 @@ export default function StaffPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const { register, handleSubmit, watch, setValue, reset, formState: { errors } } = useForm<StaffFormData>({
-    resolver: zodResolver(staffSchema),
+    resolver: zodResolver(staffSchema) as any,
     defaultValues: { name: '', phone: '', email: '', role: 'STAFF', shift: 'morning', active: true },
   });
   const shiftVal = watch('shift');
