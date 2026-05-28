@@ -1,5 +1,8 @@
 import { MetadataRoute } from 'next';
 
+// This forces Next.js to pre-render the manifest for your static export (.exe)
+export const dynamic = 'force-static';
+
 export default function manifest(): MetadataRoute.Manifest {
   return {
     name: 'DoodhOS Milk Collection Center',
@@ -11,9 +14,14 @@ export default function manifest(): MetadataRoute.Manifest {
     theme_color: '#FF6B00',
     icons: [
       {
-        src: '/favicon.ico',
-        sizes: 'any',
-        type: 'image/x-icon',
+        src: '/icon-192x192.png',
+        sizes: '192x192',
+        type: 'image/png',
+      },
+      {
+        src: '/icon-512x512.png',
+        sizes: '512x512',
+        type: 'image/png',
       },
     ],
   };
