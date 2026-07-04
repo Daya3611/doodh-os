@@ -86,7 +86,7 @@ function PaymentsPageContent({
 
   // Auto-fill farmer name + calc pending balance when farmer selected
   useEffect(() => {
-    const farmer = farmers.find(f => f.id.toLowerCase() === farmerIdVal?.toLowerCase());
+    const farmer = farmers.find((f: Farmer) => f.id.toLowerCase() === farmerIdVal?.toLowerCase());
     setSelectedFarmer(farmer || null);
     if (farmer) {
       setValue('farmerName', farmer.name);
@@ -125,11 +125,11 @@ function PaymentsPageContent({
     catch { toast.error('Failed to delete'); }
   };
 
-  const filtered = payments.filter(p =>
+  const filtered = payments.filter((p: Payment) =>
     p.farmerName.toLowerCase().includes(search.toLowerCase()) ||
     p.farmerId.toLowerCase().includes(search.toLowerCase())
   );
-  const totalPaid = payments.filter(p => p.paymentMethod).reduce((s, p) => s + p.amount, 0);
+  const totalPaid = payments.filter((p: Payment) => p.paymentMethod).reduce((s: number, p: Payment) => s + p.amount, 0);
 
   return (
     <div className="space-y-5">
@@ -150,7 +150,7 @@ function PaymentsPageContent({
         {[
           { label: 'Total Paid', value: `₹${totalPaid.toLocaleString()}`, color: '#22C55E' },
           { label: 'Transactions', value: `${payments.length}`, color: '#FF6B00' },
-          { label: 'Farmers Paid', value: `${new Set(payments.map(p => p.farmerId)).size}`, color: '#3B82F6' },
+          { label: 'Farmers Paid', value: `${new Set(payments.map((p: any) => p.farmerId)).size}`, color: '#3B82F6' },
         ].map(s => (
           <div key={s.label} style={{ ...cardStyle, padding: '20px' }}>
             <div className="text-[12px] text-[#777777] mb-1">{s.label}</div>
@@ -203,7 +203,7 @@ function PaymentsPageContent({
                   </td>
                 </tr>
               ) : (
-                filtered.map((p, i) => {
+                filtered.map((p: Payment, i: number) => {
                   const m = methodMeta[p.paymentMethod];
                   const Icon = m.icon;
                   let dateStr = 'N/A';
@@ -281,12 +281,12 @@ function PaymentsPageContent({
                     onBlur={e => { e.currentTarget.style.borderColor = '#ECECEC'; }}
                   />
                   <datalist id="farmer-list">
-                    {farmers.map(f => (
+                    {farmers.map((f: Farmer) => (
                       <option key={f.id} value={f.id}>{f.name} - {f.village}</option>
                     ))}
                   </datalist>
                   {errors.farmerId && <p className="text-[11px] text-red-500 mt-1">{errors.farmerId.message}</p>}
-                  
+
                   <div className="h-6 mt-2">
                     {selectedFarmer ? (
                       <div className="flex items-center gap-2">
