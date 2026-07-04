@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Building2, Receipt, Globe, Bell, Save } from 'lucide-react';
+import { Building2, Receipt, Globe, Bell, Save, Loader2 } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
+import { settingsService } from '@/services/settingsService';
 import { toast } from 'sonner';
 
 const cardStyle = { background: '#FFFFFF', borderRadius: '20px', border: '1px solid #ECECEC', boxShadow: '0 1px 4px rgba(0,0,0,0.05)', padding: '24px' };
@@ -20,14 +21,51 @@ const sections = [
 export default function SettingsPage() {
   const { profile } = useAuthStore();
   const [activeSection, setActiveSection] = useState('center');
+  
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+
   const [centerName, setCenterName] = useState(profile?.name ? `${profile.name}'s Center` : 'My Dairy Center');
+  const [ownerName, setOwnerName] = useState(profile?.name || '');
   const [address, setAddress] = useState('Village Road, District, State');
-  const [footerText, setFooterText] = useState('Thank you for your business!');
+  const [phone, setPhone] = useState('');
+  
   const [smsEnabled, setSmsEnabled] = useState(false);
   const [whatsappEnabled, setWhatsappEnabled] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
+  const [language, setLanguage] = useState('en');
 
-  const handleSave = () => { toast.success('Settings saved successfully'); };
+  useEffect(() => {
+    if (profile?.centerId) {
+      settingsService.getSettings(profile.centerId).then(data => {
+        if (data.centerName) setCenterName(data.centerName);
+        if (data.ownerName) setOwnerName(data.ownerName);
+        if (data.address) setAddress(data.address);
+        if (data.phone) setPhone(data.phone);
+        if (data.smsEnabled !== undefined) setSmsEnabled(data.smsEnabled);
+        if (data.whatsappEnabled !== undefined) setWhatsappEnabled(data.whatsappEnabled);
+        if (data.darkMode !== undefined) setDarkMode(data.darkMode);
+        if (data.language) setLanguage(data.language);
+        setIsLoading(false);
+      });
+    }
+  }, [profile?.centerId]);
+
+  const handleSave = async () => {
+    if (!profile?.centerId) return;
+    setIsSaving(true);
+    try {
+      await settingsService.saveSettings(profile.centerId, {
+        centerName, ownerName, address, phone,
+        smsEnabled, whatsappEnabled, darkMode, language
+      });
+      toast.success('Settings saved successfully');
+    } catch (e) {
+      toast.error('Failed to save settings');
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   const focusStyle = (e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => { e.currentTarget.style.borderColor = '#FF6B00'; };
   const blurStyle = (e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => { e.currentTarget.style.borderColor = '#ECECEC'; };
@@ -62,7 +100,11 @@ export default function SettingsPage() {
 
       {/* Content */}
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} style={cardStyle} className="lg:col-span-3">
-        {activeSection === 'center' && (
+        {isLoading ? (
+          <div className="flex items-center justify-center p-12 text-slate-400"><Loader2 className="animate-spin" /></div>
+        ) : (
+          <>
+            {activeSection === 'center' && (
           <div className="space-y-5">
             <div className="text-[16px] font-bold text-[#111111] mb-5">Center Information</div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -72,7 +114,7 @@ export default function SettingsPage() {
               </div>
               <div>
                 <label className="text-[12px] font-semibold text-[#777777] uppercase tracking-wider mb-2 block">Owner Name</label>
-                <input className={inputClass} style={inputStyle} defaultValue={profile?.name || ''} onFocus={focusStyle} onBlur={blurStyle} />
+                <input className={inputClass} style={inputStyle} value={ownerName} onChange={e => setOwnerName(e.target.value)} onFocus={focusStyle} onBlur={blurStyle} />
               </div>
               <div className="sm:col-span-2">
                 <label className="text-[12px] font-semibold text-[#777777] uppercase tracking-wider mb-2 block">Address</label>
@@ -80,7 +122,7 @@ export default function SettingsPage() {
               </div>
               <div>
                 <label className="text-[12px] font-semibold text-[#777777] uppercase tracking-wider mb-2 block">Phone</label>
-                <input className={inputClass} style={inputStyle} placeholder="Center contact number" onFocus={focusStyle} onBlur={blurStyle} />
+                <input className={inputClass} style={inputStyle} value={phone} onChange={e => setPhone(e.target.value)} placeholder="Center contact number" onFocus={focusStyle} onBlur={blurStyle} />
               </div>
             </div>
           </div>
@@ -88,29 +130,18 @@ export default function SettingsPage() {
 
         {activeSection === 'receipt' && (
           <div className="space-y-5">
-            <div className="text-[16px] font-bold text-[#111111] mb-5">Receipt Settings</div>
-            <div>
-              <label className="text-[12px] font-semibold text-[#777777] uppercase tracking-wider mb-2 block">Receipt Width</label>
-              <select className="w-full px-4 py-3 text-[14px] rounded-xl outline-none transition-all" style={inputStyle}>
-                <option value="80mm">80mm (Default Thermal)</option>
-                <option value="58mm">58mm (Small Thermal)</option>
-              </select>
-            </div>
-            <div>
-              <label className="text-[12px] font-semibold text-[#777777] uppercase tracking-wider mb-2 block">Receipt Footer Text</label>
-              <textarea
-                className="w-full px-4 py-3 text-[14px] rounded-xl outline-none transition-all resize-none"
-                style={{ ...inputStyle, minHeight: '80px' }}
-                value={footerText} onChange={e => setFooterText(e.target.value)}
-                onFocus={focusStyle as any} onBlur={blurStyle as any}
-              />
-            </div>
-            <div className="flex items-center justify-between p-4 rounded-xl" style={{ background: '#F7F7F7' }}>
+            <div className="text-[16px] font-bold text-[#111111] mb-5">Receipt & Printer Settings</div>
+            <div className="flex items-center justify-between p-5 rounded-xl border border-slate-200 bg-white">
               <div>
-                <div className="text-[14px] font-semibold text-[#111111]">Auto Print</div>
-                <div className="text-[12px] text-[#777777]">Automatically open print dialog after saving a collection</div>
+                <div className="text-[15px] font-bold text-[#111111] flex items-center gap-2"><Receipt size={18} className="text-[#FF6B00]" /> Advanced Printer Management</div>
+                <div className="text-[13px] text-[#777777] mt-1">Configure Thermal and A4 receipt printers, templates, logos, and auto-print logic.</div>
               </div>
-              <Toggle value={false} onChange={() => {}} />
+              <button
+                onClick={() => window.location.href = '/settings/printer'}
+                className="px-5 py-2.5 rounded-lg text-sm font-semibold bg-[#FFF5EE] text-[#FF6B00] hover:bg-[#FFE8D6] transition-colors whitespace-nowrap"
+              >
+                Configure Printer
+              </button>
             </div>
           </div>
         )}
@@ -145,7 +176,7 @@ export default function SettingsPage() {
             </div>
             <div>
               <label className="text-[12px] font-semibold text-[#777777] uppercase tracking-wider mb-2 block">Language</label>
-              <select className="w-full px-4 py-3 text-[14px] rounded-xl outline-none transition-all" style={inputStyle}>
+              <select className="w-full px-4 py-3 text-[14px] rounded-xl outline-none transition-all" style={inputStyle} value={language} onChange={e => setLanguage(e.target.value)}>
                 <option value="en">English</option>
                 <option value="hi">हिन्दी (Hindi)</option>
                 <option value="mr">मराठी (Marathi)</option>
@@ -158,13 +189,15 @@ export default function SettingsPage() {
         <div className="pt-6 mt-6 border-t border-[#F0F0F0]">
           <motion.button
             whileHover={{ scale: 1.01, y: -1 }} whileTap={{ scale: 0.99 }}
-            onClick={handleSave}
-            className="flex items-center gap-2 px-6 py-2.5 text-[14px] font-semibold text-white"
+            onClick={handleSave} disabled={isSaving}
+            className="flex items-center gap-2 px-6 py-2.5 text-[14px] font-semibold text-white disabled:opacity-50"
             style={{ background: '#FF6B00', borderRadius: '14px', boxShadow: '0 2px 8px rgba(255,107,0,0.3)' }}
           >
-            <Save size={16} /> Save Changes
+            {isSaving ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />} Save Changes
           </motion.button>
         </div>
+          </>
+        )}
       </motion.div>
     </div>
   );

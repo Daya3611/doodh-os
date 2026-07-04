@@ -26,17 +26,34 @@ export interface Farmer extends FarmerFormData {
 
 // Rate Chart
 export const rateChartSchema = z.object({
-  animalType: z.enum(['cow', 'buffalo']),
-  fat: z.number().min(1, "FAT must be greater than 0"),
-  snf: z.number().min(1, "SNF must be greater than 0"),
-  rate: z.number().min(0, "Rate must be positive"),
+  version: z.string().min(1, "Version is required"),
+  animal: z.enum(['cow', 'buffalo']),
+  status: z.enum(['active', 'draft', 'archived', 'upcoming', 'expired']),
+  description: z.string().optional(),
+  effectiveFrom: z.coerce.date(),
+  effectiveUntil: z.coerce.date().nullable().optional(),
+  totalEntries: z.number().optional(),
 });
 
 export type RateChartFormData = z.infer<typeof rateChartSchema>;
 
-export interface RateChart extends RateChartFormData {
+export interface RateChart extends Omit<RateChartFormData, 'effectiveFrom' | 'effectiveUntil'> {
   id: string;
   effectiveFrom: Timestamp | Date;
+  effectiveUntil: Timestamp | Date | null;
+  createdBy: string;
+  createdAt: Timestamp | Date;
+  updatedAt: Timestamp | Date;
+}
+
+// Rate Chart Entry
+export interface RateChartEntry {
+  id: string;
+  rateChartId: string;
+  fat: number;
+  snf: number;
+  rate: number;
+  createdAt: Timestamp | Date;
 }
 
 // Collection
@@ -93,7 +110,7 @@ export interface InventoryItem extends InventoryFormData {
 }
 
 export interface PurchaseItem {
-  productId: string;
+  productId?: string;
   name: string;
   quantity: number;
   price: number;
@@ -108,4 +125,27 @@ export interface Purchase {
   total: number;
   createdAt: Timestamp | Date;
   createdBy: string;
+}
+
+// Printer Settings
+export const printerSettingsSchema = z.object({
+  printerType: z.enum(['58mm', '80mm', 'a4']),
+  printerName: z.string().optional(),
+  autoPrint: z.boolean().default(false),
+  copies: z.number().min(1).max(5).default(1),
+  printLogo: z.boolean().default(false),
+  printQrCode: z.boolean().default(false),
+  printBalance: z.boolean().default(true),
+  footerMessage: z.string().optional(),
+  fontSize: z.string().optional(),
+  characterDensity: z.string().optional(),
+  leftMargin: z.number().optional(),
+  topMargin: z.number().optional(),
+});
+
+export type PrinterSettingsFormData = z.infer<typeof printerSettingsSchema>;
+
+export interface PrinterSettings extends PrinterSettingsFormData {
+  id: string;
+  updatedAt: Timestamp | Date;
 }

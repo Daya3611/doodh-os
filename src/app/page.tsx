@@ -16,13 +16,22 @@ export default function Home() {
     }
   }, [user, isLoading, router]);
 
-  if (isLoading) return null;
+  if (isLoading) {
+    return (
+      <div className="flex h-screen w-full items-center justify-center bg-zinc-50 dark:bg-zinc-900">
+        <div className="flex flex-col items-center animate-pulse">
+          <img src="/logo.svg" alt="DoodhOS Logo" className="h-20 w-auto mb-4" />
+          <div className="text-zinc-400 font-medium tracking-wider text-sm">LOADING...</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col min-h-screen">
       <header className="px-4 lg:px-6 h-16 flex items-center border-b">
         <Link className="flex items-center justify-center" href="/">
-          <span className="font-bold text-2xl tracking-tight text-primary">DoodhOS</span>
+          <img src="/logo.svg" alt="DoodhOS" className="h-10 w-auto" />
         </Link>
         <nav className="ml-auto flex gap-4 sm:gap-6">
           <Link className="text-sm font-medium hover:underline underline-offset-4" href="#features">

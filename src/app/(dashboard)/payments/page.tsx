@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useAuthStore } from '@/store/useAuthStore';
 import { paymentService, Payment, PaymentFormData } from '@/services/paymentService';
 import { farmerService } from '@/services/farmerService';
@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, X, Search, Printer, Trash2, CreditCard, Banknote, Smartphone, Wallet } from 'lucide-react';
 import { format } from 'date-fns';
+import { useSearchParams } from 'next/navigation';
 
 const cardStyle = { background: '#FFFFFF', borderRadius: '20px', border: '1px solid #ECECEC', boxShadow: '0 1px 4px rgba(0,0,0,0.05)' };
 const methodMeta: Record<string, { label: string; icon: React.ElementType; bg: string; color: string }> = {
@@ -53,9 +54,39 @@ export default function PaymentsPage() {
 
   useEffect(() => { load(); }, [centerId]);
 
+  return (
+    <Suspense fallback={null}>
+      <PaymentsPageContent
+        centerId={centerId} profile={profile} payments={payments} farmers={farmers}
+        isLoading={isLoading} showForm={showForm} setShowForm={setShowForm}
+        selectedFarmer={selectedFarmer} setSelectedFarmer={setSelectedFarmer}
+        pendingBalance={pendingBalance} setPendingBalance={setPendingBalance}
+        register={register} handleSubmit={handleSubmit} watch={watch} setValue={setValue} reset={reset} errors={errors}
+        farmerIdVal={farmerIdVal} load={load} search={search} setSearch={setSearch} methodVal={methodVal}
+      />
+    </Suspense>
+  );
+}
+
+function PaymentsPageContent({
+  centerId, profile, payments, farmers, isLoading, showForm, setShowForm,
+  selectedFarmer, setSelectedFarmer, pendingBalance, setPendingBalance,
+  register, handleSubmit, watch, setValue, reset, errors, farmerIdVal, load, search, setSearch, methodVal
+}: any) {
+  const searchParams = useSearchParams();
+
+  // Read URL params to auto-open form for specific farmer
+  useEffect(() => {
+    const prefillFarmer = searchParams.get('farmerId');
+    if (prefillFarmer) {
+      setValue('farmerId', prefillFarmer);
+      setShowForm(true);
+    }
+  }, [searchParams, setValue]);
+
   // Auto-fill farmer name + calc pending balance when farmer selected
   useEffect(() => {
-    const farmer = farmers.find(f => f.id === farmerIdVal);
+    const farmer = farmers.find(f => f.id.toLowerCase() === farmerIdVal?.toLowerCase());
     setSelectedFarmer(farmer || null);
     if (farmer) {
       setValue('farmerName', farmer.name);
@@ -238,20 +269,41 @@ export default function PaymentsPage() {
               <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
                 {/* Farmer Select */}
                 <div>
-                  <label className="text-[12px] font-semibold text-[#777777] uppercase tracking-wider mb-2 block">Farmer</label>
-                  <select {...register('farmerId')} className="w-full px-4 py-3 text-[14px] rounded-xl outline-none" style={{ background: '#F7F7F7', border: '1.5px solid #ECECEC', color: '#111111' }}>
-                    <option value="">Select farmer...</option>
-                    {farmers.map(f => <option key={f.id} value={f.id}>{f.id} — {f.name}</option>)}
-                  </select>
+                  <label className="text-[12px] font-semibold text-[#777777] uppercase tracking-wider mb-2 block">Farmer ID</label>
+                  <input
+                    {...register('farmerId')}
+                    list="farmer-list"
+                    autoComplete="off"
+                    placeholder="Enter Farmer ID..."
+                    className="w-full px-4 py-3 text-[14px] rounded-xl outline-none transition-all uppercase"
+                    style={{ background: '#F7F7F7', border: '1.5px solid #ECECEC', color: '#111111' }}
+                    onFocus={e => { e.currentTarget.style.borderColor = '#FF6B00'; }}
+                    onBlur={e => { e.currentTarget.style.borderColor = '#ECECEC'; }}
+                  />
+                  <datalist id="farmer-list">
+                    {farmers.map(f => (
+                      <option key={f.id} value={f.id}>{f.name} - {f.village}</option>
+                    ))}
+                  </datalist>
                   {errors.farmerId && <p className="text-[11px] text-red-500 mt-1">{errors.farmerId.message}</p>}
-                  {pendingBalance !== null && (
-                    <div className="mt-2 flex items-center gap-2">
-                      <span className="text-[12px] text-[#777]">Pending balance:</span>
-                      <span className="text-[13px] font-bold" style={{ color: pendingBalance > 0 ? '#EF4444' : '#22C55E' }}>
-                        ₹{pendingBalance.toFixed(2)}
-                      </span>
-                    </div>
-                  )}
+                  
+                  <div className="h-6 mt-2">
+                    {selectedFarmer ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-[13px] font-semibold" style={{ color: '#22C55E' }}>{selectedFarmer.name}</span>
+                        {pendingBalance !== null && (
+                          <>
+                            <span className="text-[12px] text-[#777]">· A/C balance:</span>
+                            <span className="text-[13px] font-bold" style={{ color: pendingBalance > 0 ? '#EF4444' : '#22C55E' }}>
+                              {pendingBalance > 0 ? '+' : ''}₹{pendingBalance.toFixed(2)}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    ) : farmerIdVal ? (
+                      <span className="text-[12px] text-red-500">Farmer not found. Check ID.</span>
+                    ) : null}
+                  </div>
                 </div>
 
                 {/* Amount */}

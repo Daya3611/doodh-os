@@ -5,7 +5,8 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { DashboardSidebar } from '@/components/DashboardSidebar';
-import { Bell, Search } from 'lucide-react';
+import { GlobalSearch } from '@/components/GlobalSearch';
+import { Bell } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 // Page title mapping
@@ -49,16 +50,15 @@ function TopBar() {
       {/* Right: Search + Notifications + Avatar */}
       <div className="flex items-center gap-3">
         {/* Search */}
-        <div className="relative hidden lg:flex items-center">
-          <Search size={15} className="absolute left-3 text-[#BBBBBB]" />
-          <input
-            className="topbar-search pl-9 pr-4 py-2 w-52 text-[13px]"
-            placeholder="Search something..."
-          />
-        </div>
+        <GlobalSearch />
 
         {/* Notifications */}
         <motion.button
+          onClick={() => {
+            import('sonner').then(({ toast }) => {
+              toast.info('Notification system under development');
+            });
+          }}
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
           className="relative flex items-center justify-center w-9 h-9 rounded-xl border border-[#ECECEC] bg-white"
@@ -99,12 +99,7 @@ export default function DashboardLayout({
     return (
       <div className="flex h-screen w-screen items-center justify-center" style={{ background: '#F7F7F7' }}>
         <div className="flex flex-col items-center gap-4">
-          <div
-            className="w-10 h-10 rounded-2xl flex items-center justify-center"
-            style={{ background: '#FF6B00' }}
-          >
-            <span className="text-white font-bold text-lg">D</span>
-          </div>
+          <img src="/logo.svg" alt="DoodhOS Logo" className="h-16 w-auto mb-2 animate-pulse" />
           <div className="w-8 h-8 border-2 border-[#FF6B00] border-t-transparent rounded-full animate-spin" />
         </div>
       </div>

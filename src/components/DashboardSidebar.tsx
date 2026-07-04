@@ -61,14 +61,9 @@ export function DashboardSidebar() {
       style={{ width: 280, background: '#FFFFFF', borderRight: '1px solid #ECECEC' }}
     >
       {/* Logo */}
-      <div className="flex items-center gap-3 px-6 py-6 border-b border-[#ECECEC]">
-        <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: '#FF6B00' }}>
-          <Droplets size={18} color="#FFF" />
-        </div>
-        <div>
-          <div className="font-bold text-[16px] text-[#111111] leading-tight">DoodhOS</div>
-          <div className="text-[11px] text-[#777777] leading-tight">Milk Collection Center</div>
-        </div>
+      <div className="flex items-center gap-3 px-6 py-5 border-b border-[#ECECEC]">
+        <img src="/logo.svg" alt="DoodhOS Logo" className="h-10 w-auto object-contain" />
+        <span className="font-extrabold text-[20px] text-[#FF6B00] tracking-tight">DoodhOS</span>
       </div>
 
       {/* Nav */}

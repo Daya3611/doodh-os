@@ -1,36 +1,40 @@
 import React from 'react';
-import { Collection, Farmer } from '@/types';
+import { Collection, Farmer, PrinterSettingsFormData } from '@/types';
 import { format } from 'date-fns';
 
 interface ThermalReceiptProps {
   collection: Collection;
   farmer: Farmer | null;
-  settings?: {
-    width?: '58mm' | '80mm';
-    centerName?: string;
-    centerPhone?: string;
-    centerVillage?: string;
-    footerText?: string;
-  };
+  settings: PrinterSettingsFormData;
+  centerName?: string;
+  centerVillage?: string;
+  centerPhone?: string;
 }
 
 export const ThermalReceipt = React.forwardRef<HTMLDivElement, ThermalReceiptProps>(
-  ({ collection, farmer, settings }, ref) => {
-    const width = settings?.width === '58mm' ? '58mm' : '80mm';
+  ({ collection, farmer, settings, centerName, centerVillage, centerPhone }, ref) => {
+    const width = settings.printerType === '58mm' ? '58mm' : '80mm';
     const d = (collection.createdAt as any)?.toDate ? (collection.createdAt as any).toDate() : new Date(collection.createdAt as any);
     
     return (
-      <div ref={ref} className="receipt-container" style={{ width, margin: '0 auto', background: 'white', padding: '10px' }}>
+      <div ref={ref} className="receipt-container" style={{ width, boxSizing: 'border-box', background: 'white' }}>
         <style type="text/css">
           {`
             @media print {
-              @page { margin: 0; size: auto; }
+              @page { margin: 0; size: ${width} auto; }
               body { margin: 0; padding: 0; }
+              html { background: white; }
+              
               .receipt-container {
                 font-family: monospace;
-                font-size: 12px;
+                font-size: ${settings.fontSize || '12px'};
                 color: #000;
                 line-height: 1.4;
+                width: ${width};
+                max-width: ${width};
+                margin: 0;
+                padding: ${settings.topMargin || 0}px 10px 10px ${settings.leftMargin || 10}px;
+                box-sizing: border-box;
               }
               .divider { border-top: 1px dashed #000; margin: 8px 0; }
               .text-center { text-align: center; }
@@ -43,13 +47,19 @@ export const ThermalReceipt = React.forwardRef<HTMLDivElement, ThermalReceiptPro
           `}
         </style>
         
-        <div className="receipt-container">
+        <div className="receipt-content">
           {/* Header */}
           <div className="text-center">
-            <div className="title">{settings?.centerName || 'DOODHOS'}</div>
+            {settings.printLogo && (
+              <div className="mb-2">
+                {/* Placeholder for Logo */}
+                <div style={{ width: '40px', height: '40px', margin: '0 auto', background: '#000', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: '10px' }}>LOGO</div>
+              </div>
+            )}
+            <div className="title">{centerName || 'DOODHOS'}</div>
             <div>Milk Collection Center</div>
-            {settings?.centerVillage && <div>Village: {settings.centerVillage}</div>}
-            {settings?.centerPhone && <div>Phone: {settings.centerPhone}</div>}
+            {centerVillage && <div>Village: {centerVillage}</div>}
+            {centerPhone && <div>Phone: {centerPhone}</div>}
           </div>
 
           <div className="divider" />
@@ -73,7 +83,7 @@ export const ThermalReceipt = React.forwardRef<HTMLDivElement, ThermalReceiptPro
           {/* Farmer Info */}
           <div className="flex-between">
             <span>Farmer:</span>
-            <span className="bold">{collection.farmerName}</span>
+            <span className="bold text-right pl-2" style={{ wordBreak: 'break-word' }}>{collection.farmerName}</span>
           </div>
           <div className="flex-between">
             <span>Farmer ID:</span>
@@ -117,37 +127,47 @@ export const ThermalReceipt = React.forwardRef<HTMLDivElement, ThermalReceiptPro
           <div className="divider" />
 
           {/* Total */}
-          <div className="text-center bold" style={{ fontSize: '14px', margin: '4px 0' }}>
-            TOTAL
-          </div>
-          <div className="text-center bold" style={{ fontSize: '20px' }}>
-            ₹{collection.totalAmount.toFixed(2)}
+          <div className="flex-between bold" style={{ fontSize: '14px', margin: '4px 0' }}>
+            <span>TOTAL AMOUNT</span>
+            <span>₹{collection.totalAmount.toFixed(2)}</span>
           </div>
 
-          <div className="divider" />
-
-          {/* Account Balance */}
-          {farmer && (
-            <div className="flex-between" style={{ marginTop: '8px' }}>
-              <span>A/C Balance:</span>
-              <span className="bold" style={{ color: (farmer.balance || 0) >= 0 ? 'inherit' : 'inherit' }}>
-                {(farmer.balance || 0) >= 0 ? '+' : '-'}₹{Math.abs(farmer.balance || 0).toFixed(2)}
-              </span>
-            </div>
+          {settings.printBalance && farmer && (
+            <>
+              <div className="divider" />
+              <div className="flex-between" style={{ marginTop: '4px', fontSize: '11px' }}>
+                <span>A/C Balance:</span>
+                <span className="bold">
+                  {(farmer.balance || 0) >= 0 ? '+' : '-'}₹{Math.abs(farmer.balance || 0).toFixed(2)}
+                </span>
+              </div>
+            </>
           )}
 
           <div className="divider" />
 
+          {settings.printQrCode && (
+            <div className="text-center my-3">
+               {/* Placeholder for QR Code */}
+               <div style={{ width: '80px', height: '80px', margin: '0 auto', border: '2px solid #000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                 <span style={{ fontSize: '10px' }}>QR CODE</span>
+               </div>
+            </div>
+          )}
+
           {/* Footer */}
           <div className="text-center" style={{ marginTop: '12px' }}>
-            {settings?.footerText ? (
-              <div style={{ whiteSpace: 'pre-line' }}>{settings.footerText}</div>
+            {settings.footerMessage ? (
+              <div style={{ whiteSpace: 'pre-line', fontSize: '11px' }}>{settings.footerMessage}</div>
             ) : (
-              <>
+              <div style={{ fontSize: '11px' }}>
                 <div>Thank You</div>
                 <div>Visit Again</div>
-              </>
+              </div>
             )}
+            <div style={{ fontSize: '9px', marginTop: '6px', color: '#555' }}>
+              Printed on {format(new Date(), 'dd/MM/yyyy hh:mm a')}
+            </div>
           </div>
         </div>
       </div>

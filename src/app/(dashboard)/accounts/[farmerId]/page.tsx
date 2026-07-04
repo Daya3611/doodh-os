@@ -112,8 +112,8 @@ export default function FarmerLedgerPage({ params }: { params: Promise<{ farmerI
           </div>
         </div>
         <div>
-          <button className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-[13px] font-bold bg-[#111] text-white hover:bg-gray-800 transition-colors">
-            <Plus size={16} /> Manual Adjustment
+          <button onClick={() => router.push(`/payments?farmerId=${farmer.id}`)} className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-[13px] font-bold bg-[#111] text-white hover:bg-gray-800 transition-colors">
+            <Plus size={16} /> Add Payment
           </button>
         </div>
       </div>

@@ -35,25 +35,7 @@ export const purchaseService = {
       const currentBalance = farmerDoc.data().balance || 0;
       const newBalance = currentBalance - total;
 
-      // 2. Read all inventory items to ensure stock is sufficient
-      const inventoryRefs = items.map(item => doc(db, 'centers', centerId, 'inventory', item.productId));
-      const inventoryDocs = await Promise.all(inventoryRefs.map(ref => tx.get(ref)));
-      
-      inventoryDocs.forEach((invDoc, index) => {
-        if (!invDoc.exists()) throw new Error(`Product ${items[index].name} not found`);
-        const currentStock = invDoc.data().stock || 0;
-        if (currentStock < items[index].quantity) {
-          throw new Error(`Insufficient stock for ${items[index].name}`);
-        }
-      });
-
-      // 3. Update inventory stocks
-      inventoryDocs.forEach((invDoc, index) => {
-        const currentStock = invDoc.data()?.stock || 0;
-        tx.update(invDoc.ref, { stock: currentStock - items[index].quantity });
-      });
-
-      // 4. Create the purchase document
+      // 2. Create the purchase document
       const purchaseRef = doc(purchaseService.getCollectionRef(centerId));
       tx.set(purchaseRef, {
         farmerId,

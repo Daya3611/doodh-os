@@ -38,11 +38,15 @@ export const paymentService = {
   getByFarmer: async (centerId: string, farmerId: string): Promise<Payment[]> => {
     const q = query(
       paymentService.getCollectionRef(centerId),
-      where('farmerId', '==', farmerId),
-      orderBy('createdAt', 'desc')
+      where('farmerId', '==', farmerId)
     );
     const snap = await getDocs(q);
-    return snap.docs.map(d => ({ id: d.id, ...d.data() } as Payment));
+    const results = snap.docs.map(d => ({ id: d.id, ...d.data() } as Payment));
+    return results.sort((a, b) => {
+      const timeA = (a.createdAt as any)?.toMillis?.() || new Date(a.createdAt as any || 0).getTime();
+      const timeB = (b.createdAt as any)?.toMillis?.() || new Date(b.createdAt as any || 0).getTime();
+      return timeB - timeA;
+    });
   },
 
   add: async (centerId: string, data: PaymentFormData, createdBy: string): Promise<string> => {

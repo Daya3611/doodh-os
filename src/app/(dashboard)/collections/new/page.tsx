@@ -15,6 +15,10 @@ import { CheckCircle2, Printer } from 'lucide-react';
 import { format } from 'date-fns';
 import { useReactToPrint } from 'react-to-print';
 import { ThermalReceipt } from '@/components/receipt/ThermalReceipt';
+import { A4Receipt } from '@/components/receipt/A4Receipt';
+import { printerService } from '@/services/printerService';
+import { settingsService, GeneralSettings } from '@/services/settingsService';
+import { PrinterSettingsFormData } from '@/types';
 
 const schema = z.object({
   farmerId: z.string().min(1, 'Farmer ID required'),
@@ -51,6 +55,8 @@ export default function NewCollectionPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [savedCount, setSavedCount] = useState(0);
   const [lastSavedCollection, setLastSavedCollection] = useState<Collection | null>(null);
+  const [printerSettings, setPrinterSettings] = useState<PrinterSettingsFormData | null>(null);
+  const [generalSettings, setGeneralSettings] = useState<Partial<GeneralSettings>>({});
 
   const receiptRef = useRef<HTMLDivElement>(null);
   
@@ -86,6 +92,12 @@ export default function NewCollectionPage() {
     if (centerId) {
       farmerService.getAll(centerId).then(setFarmers);
       loadRecent();
+      printerService.getSettings(centerId).then(data => {
+        setPrinterSettings(data || printerService.getDefaultSettings());
+      });
+      settingsService.getSettings(centerId).then(data => {
+        setGeneralSettings(data || {});
+      });
     }
   }, [centerId]);
 
@@ -158,8 +170,14 @@ export default function NewCollectionPage() {
       toast.success(`✓ Saved — ${currentFarmer.name} — ₹${totalAmount.toFixed(2)}`);
       setSavedCount(c => c + 1);
       
-      // Save for print receipt button
-      setLastSavedCollection({ ...colData, id: newId, createdBy: profile.uid || 'unknown', createdAt: new Date() as any });
+      // Save and automatically print the receipt if enabled
+      const savedCol = { ...colData, id: newId, createdBy: profile.uid || 'unknown', createdAt: new Date() as any };
+      
+      if (printerSettings?.autoPrint) {
+        printSpecificCollection(savedCol as Collection);
+      } else {
+        setLastSavedCollection(savedCol as Collection);
+      }
       
       loadRecent();
 
@@ -409,14 +427,33 @@ export default function NewCollectionPage() {
       </div>
       
       {/* Hidden print container */}
-      <div style={{ display: 'none' }}>
-        {lastSavedCollection && (
-          <ThermalReceipt
-            ref={receiptRef}
-            collection={lastSavedCollection}
-            farmer={farmers.find(f => f.id === lastSavedCollection.farmerId) || null}
-            settings={{ width: '80mm' }}
-          />
+      <div style={{ position: 'absolute', top: '-9999px', left: '-9999px', visibility: 'hidden' }}>
+        {lastSavedCollection && printerSettings && (
+          <div ref={receiptRef}>
+            {Array.from({ length: printerSettings.copies || 1 }).map((_, i) => (
+              <div key={i} style={{ marginBottom: (printerSettings.printerType === 'a4' && i > 0) ? '20px' : '0', pageBreakBefore: (printerSettings.printerType === 'a4' && i > 0) ? 'always' : 'auto' }}>
+                {printerSettings.printerType === 'a4' ? (
+                  <A4Receipt
+                    collection={lastSavedCollection}
+                    farmer={farmers.find(f => f.id === lastSavedCollection.farmerId) || null}
+                    settings={printerSettings}
+                    centerName={generalSettings.centerName || `${profile?.name}'s Center`}
+                    centerVillage={generalSettings.address || ''}
+                    centerPhone={generalSettings.phone || ''}
+                  />
+                ) : (
+                  <ThermalReceipt
+                    collection={lastSavedCollection}
+                    farmer={farmers.find(f => f.id === lastSavedCollection.farmerId) || null}
+                    settings={printerSettings}
+                    centerName={generalSettings.centerName || `${profile?.name}'s Center`}
+                    centerVillage={generalSettings.address || ''}
+                    centerPhone={generalSettings.phone || ''}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
         )}
       </div>
     </div>

@@ -115,10 +115,7 @@ export default function RegisterPage() {
       {/* Left brand panel */}
       <div className="hidden lg:flex flex-col justify-between w-[420px] p-12 flex-shrink-0" style={{ background: '#FF6B00' }}>
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-white/20 rounded-2xl flex items-center justify-center">
-            <Droplets size={22} color="white" />
-          </div>
-          <span className="text-white font-bold text-xl">DoodhOS</span>
+          <img src="/logo.svg" alt="DoodhOS Logo" className="h-10 w-auto brightness-0 invert" />
         </div>
         <div className="space-y-5">
           <h1 className="text-white text-4xl font-extrabold leading-tight">
@@ -144,10 +141,7 @@ export default function RegisterPage() {
         >
           {/* Mobile logo */}
           <div className="flex lg:hidden items-center gap-2 mb-8">
-            <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: '#FF6B00' }}>
-              <Droplets size={16} color="white" />
-            </div>
-            <span className="font-bold text-lg text-[#111111]">DoodhOS</span>
+            <img src="/logo.svg" alt="DoodhOS Logo" className="h-10 w-auto" />
           </div>
 
           <div className="mb-8">

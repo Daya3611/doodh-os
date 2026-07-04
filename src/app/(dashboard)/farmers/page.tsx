@@ -52,7 +52,17 @@ export default function FarmersPage() {
     }
   };
 
-  useEffect(() => { loadFarmers(); }, [centerId]);
+  useEffect(() => { 
+    loadFarmers(); 
+    // Check if there is a search query in the URL
+    if (typeof window !== 'undefined') {
+      const searchParams = new URLSearchParams(window.location.search);
+      const query = searchParams.get('search');
+      if (query) {
+        setSearchTerm(query);
+      }
+    }
+  }, [centerId]);
 
   useEffect(() => {
     if (selectedFarmer && centerId) {

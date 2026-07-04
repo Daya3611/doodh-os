@@ -37,11 +37,17 @@ export const collectionService = {
   getByFarmer: async (centerId: string, farmerId: string): Promise<Collection[]> => {
     const q = query(
       collectionService.getCollectionRef(centerId),
-      where('farmerId', '==', farmerId),
-      orderBy('createdAt', 'desc')
+      where('farmerId', '==', farmerId)
     );
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Collection));
+    const results = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Collection));
+    
+    // Sort client-side to avoid composite index requirement
+    return results.sort((a, b) => {
+      const timeA = (a.createdAt as any)?.toMillis?.() || new Date(a.createdAt as any).getTime();
+      const timeB = (b.createdAt as any)?.toMillis?.() || new Date(b.createdAt as any).getTime();
+      return timeB - timeA;
+    });
   },
 
   add: async (
