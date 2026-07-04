@@ -8,7 +8,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: 'DoodhOS Milk Collection Center',
     short_name: 'DoodhOS',
     description: 'A modern SaaS platform for dairy collection centers to manage farmers, milk collections, and payments.',
-    start_url: '/',
+    start_url: '/login',
     display: 'standalone',
     background_color: '#ffffff',
     theme_color: '#FF6B00',
@@ -18,11 +18,11 @@ export default function manifest(): MetadataRoute.Manifest {
         sizes: '2000x2000',
         type: 'image/png',
       },
-      {
-        src: '/logo.svg',
-        sizes: 'any',
-        type: 'image/svg+xml',
-      }
+      // {
+      //   src: '/logo.svg',
+      //   sizes: 'any',
+      //   type: 'image/svg+xml',
+      // }
     ],
   };
 }
