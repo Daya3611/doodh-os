@@ -14,15 +14,15 @@ export default function manifest(): MetadataRoute.Manifest {
     theme_color: '#FF6B00',
     icons: [
       {
-        src: '/icon-192x192.png',
-        sizes: '192x192',
+        src: '/logo.png',
+        sizes: '2000x2000',
         type: 'image/png',
       },
       {
-        src: '/icon-512x512.png',
-        sizes: '512x512',
-        type: 'image/png',
-      },
+        src: '/logo.svg',
+        sizes: 'any',
+        type: 'image/svg+xml',
+      }
     ],
   };
 }
