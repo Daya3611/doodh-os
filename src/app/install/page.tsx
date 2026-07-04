@@ -29,10 +29,12 @@ export default function InstallGuide() {
   const [isStandalone, setIsStandalone] = useState(false);
   const [activeTab, setActiveTab] = useState('android');
   const [copied, setCopied] = useState(false);
+  const [hostname, setHostname] = useState('doodhos');
 
   useEffect(() => {
     // Check if app is already running in standalone (PWA) mode
     if (typeof window !== 'undefined') {
+      setHostname(window.location.hostname);
       const isPWA = window.matchMedia('(display-mode: standalone)').matches || 
                     (window.navigator as any).standalone === true;
       setIsStandalone(isPWA);
@@ -244,7 +246,7 @@ export default function InstallGuide() {
                     <div>
                       <h4 className="font-semibold text-zinc-900 dark:text-zinc-100">Open in Chrome</h4>
                       <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-                        Open this page (<code className="bg-zinc-200 dark:bg-zinc-800 px-1 rounded text-orange-600">{window?.location?.hostname || 'doodhos'}</code>) using the <strong>Google Chrome</strong> app on your Android phone/tablet.
+                        Open this page (<code className="bg-zinc-200 dark:bg-zinc-800 px-1 rounded text-orange-600">{hostname}</code>) using the <strong>Google Chrome</strong> app on your Android phone/tablet.
                       </p>
                     </div>
                   </div>
