@@ -2,8 +2,9 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
 import {
@@ -167,9 +168,15 @@ export default function InstallGuide() {
               </div>
             </CardHeader>
             <CardContent>
-              <Button asChild className="w-full bg-emerald-600 hover:bg-emerald-700 text-white">
-                <Link href="/login">Open Dashboard Login</Link>
-              </Button>
+              <Link
+                href="/login"
+                className={cn(
+                  buttonVariants({ variant: 'default' }),
+                  'w-full bg-emerald-600 hover:bg-emerald-700 text-white'
+                )}
+              >
+                Open Dashboard Login
+              </Link>
             </CardContent>
           </Card>
         ) : deferredPrompt ? (
