@@ -21,6 +21,7 @@ export default function SubscriptionPage() {
 
   const [isUpgrading, setIsUpgrading] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
+  const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
 
   const loadData = async () => {
     if (!profile?.centerId) return;
@@ -65,7 +66,7 @@ export default function SubscriptionPage() {
       const res = await fetch('/api/payment/create-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ centerId: profile.centerId, planId })
+        body: JSON.stringify({ centerId: profile.centerId, planId, billingCycle })
       });
       const orderData = await res.json();
 
@@ -95,7 +96,8 @@ export default function SubscriptionPage() {
                 razorpay_payment_id: response.razorpay_payment_id,
                 razorpay_signature: response.razorpay_signature,
                 centerId: profile.centerId,
-                planId: planId
+                planId: planId,
+                billingCycle
               })
             });
             const verifyData = await verifyRes.json();
@@ -233,9 +235,15 @@ export default function SubscriptionPage() {
 
       {/* Upgrade Options */}
       <div className="pt-6">
-        <h3 className="text-[20px] font-bold text-[#111] mb-6 flex items-center gap-2">
-          <Sparkles className="text-[#FF6B00]" /> Upgrade your plan
-        </h3>
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6">
+          <h3 className="text-[20px] font-bold text-[#111] flex items-center gap-2">
+            <Sparkles className="text-[#FF6B00]" /> Upgrade your plan
+          </h3>
+          <div className="bg-gray-100 p-1 rounded-xl flex mt-4 md:mt-0">
+            <button onClick={() => setBillingCycle('monthly')} className={`px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${billingCycle === 'monthly' ? 'bg-white shadow-sm text-[#111]' : 'text-[#888] hover:text-[#111]'}`}>Monthly</button>
+            <button onClick={() => setBillingCycle('yearly')} className={`px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${billingCycle === 'yearly' ? 'bg-white shadow-sm text-[#111]' : 'text-[#888] hover:text-[#111]'}`}>Yearly (Save 15%)</button>
+          </div>
+        </div>
         
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {plans.filter(p => p.id !== 'plan_free_trial').map((plan) => (
@@ -249,8 +257,8 @@ export default function SubscriptionPage() {
               <div className="mb-4">
                 <h4 className="text-[18px] font-bold text-[#111]">{plan.name}</h4>
                 <div className="mt-2 flex items-end gap-1">
-                  <span className="text-[28px] font-black text-[#111]">₹{plan.monthlyPrice}</span>
-                  <span className="text-[13px] text-[#888] font-medium mb-1">/ month</span>
+                  <span className="text-[28px] font-black text-[#111]">₹{billingCycle === 'yearly' ? plan.yearlyPrice : plan.monthlyPrice}</span>
+                  <span className="text-[13px] text-[#888] font-medium mb-1">/ {billingCycle === 'yearly' ? 'year' : 'month'}</span>
                 </div>
               </div>
 

@@ -10,7 +10,7 @@ export async function POST(req: Request) {
       key_secret: process.env.RAZORPAY_KEY_SECRET || 'dummy_secret',
     });
 
-    const { centerId, planId } = await req.json();
+    const { centerId, planId, billingCycle = 'monthly' } = await req.json();
 
     if (!centerId || !planId) {
       return NextResponse.json({ error: 'Center ID and Plan ID are required' }, { status: 400 });
@@ -26,10 +26,13 @@ export async function POST(req: Request) {
     }
 
     const planDoc = await res.json();
-    const monthlyPrice = parseInt(planDoc.fields.monthlyPrice.integerValue || planDoc.fields.monthlyPrice.doubleValue || '0');
+    const monthlyPrice = parseInt(planDoc.fields.monthlyPrice?.integerValue || planDoc.fields.monthlyPrice?.doubleValue || '0');
+    const yearlyPrice = parseInt(planDoc.fields.yearlyPrice?.integerValue || planDoc.fields.yearlyPrice?.doubleValue || String(monthlyPrice * 10));
+    
+    const price = billingCycle === 'yearly' ? yearlyPrice : monthlyPrice;
     
     // Convert to paise (Razorpay expects smallest currency unit, 1 INR = 100 paise)
-    const amountInPaise = monthlyPrice * 100;
+    const amountInPaise = price * 100;
 
     const options = {
       amount: amountInPaise,
