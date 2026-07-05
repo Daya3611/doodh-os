@@ -230,6 +230,13 @@ export default function StaffPage() {
                     <input {...register('email')} type="email" className="w-full px-4 py-2.5 text-[14px] rounded-xl outline-none" style={inputStyle} placeholder="staff@doodh.com" onFocus={fc} onBlur={bc} />
                     {errors.email && <p className="text-[11px] text-red-500 mt-1">{errors.email.message}</p>}
                   </div>
+                  {!editingId && (
+                    <div className="col-span-2">
+                      <label className="text-[11px] font-semibold text-[#777] uppercase tracking-wider mb-1.5 block">Password</label>
+                      <input {...register('password')} type="password" className="w-full px-4 py-2.5 text-[14px] rounded-xl outline-none" style={inputStyle} placeholder="Set a password" onFocus={fc} onBlur={bc} />
+                      {errors.password && <p className="text-[11px] text-red-500 mt-1">{errors.password.message}</p>}
+                    </div>
+                  )}
                 </div>
 
                 <div>
