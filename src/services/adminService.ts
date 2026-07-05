@@ -91,5 +91,16 @@ export const adminService = {
   getAllSubscriptions: async () => {
     const snap = await getDocs(collection(db, 'subscriptions'));
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
+
+  getAllPayments: async () => {
+    const snap = await getDocs(collection(db, 'payments'));
+    const payments = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    // Sort in memory by paidAt descending
+    return payments.sort((a: any, b: any) => {
+      const dateA = a.paidAt?.toDate ? a.paidAt.toDate().getTime() : new Date(a.paidAt || 0).getTime();
+      const dateB = b.paidAt?.toDate ? b.paidAt.toDate().getTime() : new Date(b.paidAt || 0).getTime();
+      return dateB - dateA;
+    });
   }
 };
