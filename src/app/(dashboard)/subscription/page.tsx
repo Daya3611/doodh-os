@@ -270,17 +270,19 @@ export default function SubscriptionPage() {
 
               <button
                 onClick={() => handleUpgrade(plan.id)}
-                disabled={isUpgrading || subscription.planId === plan.id}
+                disabled={isUpgrading || (subscription.planId === plan.id && subscription.status !== 'EXPIRED')}
                 className={`w-full py-3 rounded-xl text-[14px] font-bold transition-all flex justify-center items-center gap-2 ${
-                  subscription.planId === plan.id
+                  subscription.planId === plan.id && subscription.status !== 'EXPIRED'
                     ? 'bg-orange-50 text-orange-600 cursor-default'
                     : 'bg-[#FF6B00] text-white hover:bg-orange-600'
                 }`}
               >
                 {isUpgrading && selectedPlanId === plan.id ? (
                   <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                ) : subscription.planId === plan.id ? (
+                ) : subscription.planId === plan.id && subscription.status !== 'EXPIRED' ? (
                   <>Current Plan <CheckCircle2 size={16} /></>
+                ) : subscription.planId === plan.id && subscription.status === 'EXPIRED' ? (
+                  <>Renew Plan <Sparkles size={16} /></>
                 ) : (
                   <>Choose Plan <ChevronRight size={16} /></>
                 )}
