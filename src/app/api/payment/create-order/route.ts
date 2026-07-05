@@ -3,13 +3,13 @@ import Razorpay from 'razorpay';
 import { db } from '@/firebase/config';
 import { doc, getDoc } from 'firebase/firestore';
 
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID || '',
-  key_secret: process.env.RAZORPAY_KEY_SECRET || '',
-});
-
 export async function POST(req: Request) {
   try {
+    const razorpay = new Razorpay({
+      key_id: process.env.RAZORPAY_KEY_ID || 'dummy_key',
+      key_secret: process.env.RAZORPAY_KEY_SECRET || 'dummy_secret',
+    });
+
     const { centerId, planId } = await req.json();
 
     if (!centerId || !planId) {
