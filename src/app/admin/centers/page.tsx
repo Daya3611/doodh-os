@@ -3,13 +3,19 @@
 import { useEffect, useState } from 'react';
 import { adminService, AdminCenter } from '@/services/adminService';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Building2, Search, MoreVertical, ShieldAlert, CheckCircle2 } from 'lucide-react';
+import { Building2, Search, MoreVertical, ShieldAlert, CheckCircle2, X, Save } from 'lucide-react';
 import { toast } from 'sonner';
+import { subscriptionService, SaaSPlan } from '@/services/subscriptionService';
 
 export default function MasterCentersPage() {
   const [centers, setCenters] = useState<AdminCenter[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState('');
+  
+  const [selectedCenter, setSelectedCenter] = useState<AdminCenter | null>(null);
+  const [plans, setPlans] = useState<SaaSPlan[]>([]);
+  const [newPlanId, setNewPlanId] = useState<string>('');
+  const [isSavingPlan, setIsSavingPlan] = useState(false);
 
   const loadCenters = async () => {
     setIsLoading(true);
@@ -25,7 +31,23 @@ export default function MasterCentersPage() {
 
   useEffect(() => {
     loadCenters();
+    subscriptionService.getAvailablePlans().then(setPlans);
   }, []);
+
+  const handleUpdatePlan = async () => {
+    if (!selectedCenter || !newPlanId) return;
+    setIsSavingPlan(true);
+    try {
+      await subscriptionService.upgradePlan(selectedCenter.id, newPlanId);
+      toast.success('Subscription plan updated!');
+      setSelectedCenter(null);
+      loadCenters();
+    } catch (error) {
+      toast.error('Failed to update plan');
+    } finally {
+      setIsSavingPlan(false);
+    }
+  };
 
   const handleToggleStatus = async (center: AdminCenter) => {
     const newStatus = center.status === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE';
@@ -105,7 +127,11 @@ export default function MasterCentersPage() {
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       transition={{ delay: i * 0.05 }}
-                      className="border-b border-[#F0F0F0] hover:bg-[#FAFAFA] transition-colors group"
+                      className="border-b border-[#F0F0F0] hover:bg-[#FAFAFA] transition-colors group cursor-pointer"
+                      onClick={() => {
+                        setSelectedCenter(center);
+                        setNewPlanId(''); // reset plan selection when opening
+                      }}
                     >
                       <td className="px-6 py-4">
                         <div className="text-[14px] font-bold text-[#111]">{center.name}</div>
@@ -128,7 +154,10 @@ export default function MasterCentersPage() {
                       </td>
                       <td className="px-6 py-4 text-right">
                         <button
-                          onClick={() => handleToggleStatus(center)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleToggleStatus(center);
+                          }}
                           className="text-[13px] font-semibold text-[#FF6B00] hover:underline"
                         >
                           {center.status === 'ACTIVE' ? 'Suspend' : 'Activate'}
@@ -142,6 +171,69 @@ export default function MasterCentersPage() {
           </table>
         </div>
       </motion.div>
+
+      {/* Center Details Modal */}
+      {selectedCenter && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setSelectedCenter(null)}>
+          <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-xl" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-start mb-6">
+              <div>
+                <h3 className="text-[20px] font-bold text-[#111]">{selectedCenter.name}</h3>
+                <p className="text-sm text-gray-500">ID: {selectedCenter.id}</p>
+              </div>
+              <button onClick={() => setSelectedCenter(null)} className="text-gray-400 hover:text-black">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="space-y-5">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
+                  <p className="text-[11px] font-semibold text-gray-500 uppercase">Current Plan</p>
+                  <p className="font-bold text-blue-600 mt-0.5">{selectedCenter.plan || 'Free Trial'}</p>
+                </div>
+                <div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
+                  <p className="text-[11px] font-semibold text-gray-500 uppercase">Status</p>
+                  <p className={`font-bold mt-0.5 ${selectedCenter.status === 'ACTIVE' ? 'text-green-600' : 'text-red-600'}`}>
+                    {selectedCenter.status}
+                  </p>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold mb-2">Change Subscription Plan</label>
+                <select 
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 outline-none focus:border-[#FF6B00] focus:ring-1 focus:ring-[#FF6B00]"
+                  value={newPlanId}
+                  onChange={e => setNewPlanId(e.target.value)}
+                >
+                  <option value="">-- Keep Current Plan --</option>
+                  {plans.map(p => (
+                    <option key={p.id} value={p.id}>{p.name} - ₹{p.monthlyPrice}/mo</option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-400 mt-1.5">Note: Master Admins can bypass payment gateways and directly assign plans here.</p>
+              </div>
+
+              <div className="pt-4 flex gap-3 justify-end border-t border-gray-100">
+                <button 
+                  onClick={() => setSelectedCenter(null)} 
+                  className="px-4 py-2 border rounded-xl font-semibold text-gray-600 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleUpdatePlan} 
+                  disabled={!newPlanId || isSavingPlan}
+                  className="px-4 py-2 bg-[#FF6B00] text-white rounded-xl font-bold flex items-center gap-2 hover:bg-orange-600 disabled:opacity-50"
+                >
+                  {isSavingPlan ? 'Saving...' : <><Save size={16} /> Save Changes</>}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

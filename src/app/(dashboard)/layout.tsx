@@ -19,6 +19,7 @@ const pageTitles: Record<string, { title: string; subtitle: string }> = {
   '/payments': { title: 'Payments', subtitle: 'Track and manage farmer payments' },
   '/reports': { title: 'Reports', subtitle: 'Collection analytics and financial reports' },
   '/staff': { title: 'Staff', subtitle: 'Manage collection center staff and roles' },
+  '/subscription': { title: 'Subscription', subtitle: 'Manage your DoodhOS plan, add-ons, and billing' },
   '/settings': { title: 'Settings', subtitle: 'Configure your center preferences' },
 };
 

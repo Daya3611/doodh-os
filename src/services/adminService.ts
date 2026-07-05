@@ -86,5 +86,10 @@ export const adminService = {
       console.error("Error fetching platform stats:", error);
       return { totalCenters: 0, totalOwners: 0, totalStaff: 0, totalFarmers: 0, revenueToday: 0, revenueMonthly: 0 };
     }
+  },
+
+  getAllSubscriptions: async () => {
+    const snap = await getDocs(collection(db, 'subscriptions'));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   }
 };

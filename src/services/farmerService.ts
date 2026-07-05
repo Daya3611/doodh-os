@@ -56,6 +56,13 @@ export const farmerService = {
   },
 
   add: async (centerId: string, data: FarmerFormData): Promise<string> => {
+    // Dynamically import to avoid circular dependencies if any
+    const { subscriptionService } = await import('@/services/subscriptionService');
+    const usage = await subscriptionService.checkFarmerLimit(centerId);
+    if (!usage.allowed) {
+      throw new Error(`Plan limit reached! You can only add up to ${usage.limit} farmers. Please upgrade your plan.`);
+    }
+
     const farmerId = await generateFarmerId(centerId);
     // Use the generated readable ID as the Firestore document ID
     const docRef = doc(farmerService.getCollectionRef(centerId), farmerId);

@@ -23,6 +23,7 @@ const ALL_NAV_ITEMS: NavItem[] = [
   { name: 'Purchases', href: '/purchases', icon: Droplets },
   { name: 'Reports', href: '/reports', icon: BarChart3 },
   { name: 'Staff', href: '/staff', icon: UserCog },
+  { name: 'Subscription', href: '/subscription', icon: Wallet },
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
 

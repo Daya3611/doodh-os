@@ -37,6 +37,13 @@ export const staffService = {
   add: async (centerId: string, data: StaffFormData): Promise<void> => {
     if (!data.password) throw new Error("Password is required for new staff");
 
+    // Dynamically import to avoid circular dependencies if any
+    const { subscriptionService } = await import('@/services/subscriptionService');
+    const usage = await subscriptionService.checkStaffLimit(centerId);
+    if (!usage.allowed) {
+      throw new Error(`Plan limit reached! You can only add up to ${usage.limit} staff. Please upgrade your plan.`);
+    }
+
     // 1. Create Firebase Auth User using Secondary App to prevent logging out OWNER
     const appConfig = db.app.options;
     const secondaryApp = initializeApp(appConfig, 'SecondaryApp' + Date.now());
