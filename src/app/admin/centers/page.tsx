@@ -5,7 +5,8 @@ import { adminService, AdminCenter } from '@/services/adminService';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Building2, Search, MoreVertical, ShieldAlert, CheckCircle2, X, Save } from 'lucide-react';
 import { toast } from 'sonner';
-import { subscriptionService, SaaSPlan } from '@/services/subscriptionService';
+import { subscriptionService, SaaSPlan, CenterSubscription } from '@/services/subscriptionService';
+import { Timestamp } from 'firebase/firestore';
 
 export default function MasterCentersPage() {
   const [centers, setCenters] = useState<AdminCenter[]>([]);
@@ -13,8 +14,11 @@ export default function MasterCentersPage() {
   const [search, setSearch] = useState('');
   
   const [selectedCenter, setSelectedCenter] = useState<AdminCenter | null>(null);
+  const [selectedSubscription, setSelectedSubscription] = useState<CenterSubscription | null>(null);
   const [plans, setPlans] = useState<SaaSPlan[]>([]);
   const [newPlanId, setNewPlanId] = useState<string>('');
+  const [startDateStr, setStartDateStr] = useState<string>('');
+  const [expiryDateStr, setExpiryDateStr] = useState<string>('');
   const [isSavingPlan, setIsSavingPlan] = useState(false);
 
   const loadCenters = async () => {
@@ -34,11 +38,40 @@ export default function MasterCentersPage() {
     subscriptionService.getAvailablePlans().then(setPlans);
   }, []);
 
+  useEffect(() => {
+    if (selectedCenter) {
+      subscriptionService.getSubscription(selectedCenter.id).then(sub => {
+        setSelectedSubscription(sub);
+        if (sub) {
+          setNewPlanId(sub.planId);
+          setStartDateStr(sub.startDate instanceof Timestamp ? sub.startDate.toDate().toISOString().split('T')[0] : new Date(sub.startDate).toISOString().split('T')[0]);
+          setExpiryDateStr(sub.expiryDate instanceof Timestamp ? sub.expiryDate.toDate().toISOString().split('T')[0] : new Date(sub.expiryDate).toISOString().split('T')[0]);
+        }
+      });
+    } else {
+      setSelectedSubscription(null);
+      setNewPlanId('');
+      setStartDateStr('');
+      setExpiryDateStr('');
+    }
+  }, [selectedCenter]);
+
   const handleUpdatePlan = async () => {
-    if (!selectedCenter || !newPlanId) return;
+    if (!selectedCenter) return;
     setIsSavingPlan(true);
     try {
-      await subscriptionService.upgradePlan(selectedCenter.id, newPlanId);
+      if (newPlanId && (!selectedSubscription || newPlanId !== selectedSubscription.planId)) {
+        await subscriptionService.upgradePlan(selectedCenter.id, newPlanId);
+      }
+      
+      if (startDateStr && expiryDateStr) {
+        await subscriptionService.updateSubscriptionDates(
+          selectedCenter.id, 
+          new Date(startDateStr), 
+          new Date(expiryDateStr)
+        );
+      }
+
       toast.success('Subscription plan updated!');
       setSelectedCenter(null);
       loadCenters();
@@ -130,7 +163,6 @@ export default function MasterCentersPage() {
                       className="border-b border-[#F0F0F0] hover:bg-[#FAFAFA] transition-colors group cursor-pointer"
                       onClick={() => {
                         setSelectedCenter(center);
-                        setNewPlanId(''); // reset plan selection when opening
                       }}
                     >
                       <td className="px-6 py-4">
@@ -200,19 +232,42 @@ export default function MasterCentersPage() {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-semibold mb-2">Change Subscription Plan</label>
-                <select 
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 outline-none focus:border-[#FF6B00] focus:ring-1 focus:ring-[#FF6B00]"
-                  value={newPlanId}
-                  onChange={e => setNewPlanId(e.target.value)}
-                >
-                  <option value="">-- Keep Current Plan --</option>
-                  {plans.map(p => (
-                    <option key={p.id} value={p.id}>{p.name} - ₹{p.monthlyPrice}/mo</option>
-                  ))}
-                </select>
-                <p className="text-xs text-gray-400 mt-1.5">Note: Master Admins can bypass payment gateways and directly assign plans here.</p>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-semibold mb-2">Change Subscription Plan</label>
+                  <select 
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 outline-none focus:border-[#FF6B00] focus:ring-1 focus:ring-[#FF6B00]"
+                    value={newPlanId}
+                    onChange={e => setNewPlanId(e.target.value)}
+                  >
+                    <option value="">-- Keep Current Plan --</option>
+                    {plans.map(p => (
+                      <option key={p.id} value={p.id}>{p.name} - ₹{p.monthlyPrice}/mo (₹{p.yearlyPrice}/yr)</option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-400 mt-1.5">Note: Master Admins can bypass payment gateways and directly assign plans here.</p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-semibold mb-2">Start Date</label>
+                    <input 
+                      type="date" 
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 outline-none focus:border-[#FF6B00]"
+                      value={startDateStr}
+                      onChange={e => setStartDateStr(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold mb-2">Expiry Date</label>
+                    <input 
+                      type="date" 
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 outline-none focus:border-[#FF6B00]"
+                      value={expiryDateStr}
+                      onChange={e => setExpiryDateStr(e.target.value)}
+                    />
+                  </div>
+                </div>
               </div>
 
               <div className="pt-4 flex gap-3 justify-end border-t border-gray-100">

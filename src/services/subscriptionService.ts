@@ -91,7 +91,15 @@ export const subscriptionService = {
       // Auto-initialize Free Trial for backward compatibility if a center doesn't have one
       return await subscriptionService.initFreeTrial(centerId);
     }
-    return { ...snap.data(), id: snap.id } as CenterSubscription;
+    const data = { ...snap.data(), id: snap.id } as CenterSubscription;
+    
+    // Check if expired
+    const expiry = data.expiryDate instanceof Timestamp ? data.expiryDate.toDate() : new Date(data.expiryDate);
+    if (new Date() > expiry && (data.status === 'ACTIVE' || data.status === 'TRIAL')) {
+      data.status = 'EXPIRED';
+    }
+    
+    return data;
   },
 
   initFreeTrial: async (centerId: string): Promise<CenterSubscription> => {
@@ -172,5 +180,13 @@ export const subscriptionService = {
       current,
       limit: sub.limits.staff
     };
+  },
+
+  updateSubscriptionDates: async (centerId: string, startDate: Date, expiryDate: Date): Promise<void> => {
+    const docRef = doc(db, 'subscriptions', centerId);
+    await updateDoc(docRef, {
+      startDate: Timestamp.fromDate(startDate),
+      expiryDate: Timestamp.fromDate(expiryDate)
+    });
   }
 };

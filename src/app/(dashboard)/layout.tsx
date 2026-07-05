@@ -8,6 +8,7 @@ import { DashboardSidebar } from '@/components/DashboardSidebar';
 import { GlobalSearch } from '@/components/GlobalSearch';
 import { Bell } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { subscriptionService, CenterSubscription } from '@/services/subscriptionService';
 
 // Page title mapping
 const pageTitles: Record<string, { title: string; subtitle: string }> = {
@@ -90,11 +91,21 @@ export default function DashboardLayout({
 }) {
   const { user, profile, isLoading } = useAuthStore();
   const router = useRouter();
+  const pathname = usePathname();
   const [mounted, setMounted] = useState(false);
+  const [subscription, setSubscription] = useState<CenterSubscription | null>(null);
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  useEffect(() => {
+    if (profile?.centerId) {
+      subscriptionService.getSubscription(profile.centerId).then(sub => {
+        setSubscription(sub);
+      });
+    }
+  }, [profile?.centerId]);
 
   if (!mounted || isLoading) {
     return (
@@ -111,6 +122,9 @@ export default function DashboardLayout({
     return null;
   }
 
+  const isExpired = subscription?.status === 'EXPIRED';
+  const isSubscriptionPage = pathname === '/subscription';
+
   return (
     <div className="flex h-screen overflow-hidden" style={{ background: '#F7F7F7' }}>
       {/* Sidebar */}
@@ -126,7 +140,22 @@ export default function DashboardLayout({
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.2, ease: 'easeOut' }}
         >
-          {children}
+          {isExpired && !isSubscriptionPage ? (
+            <div className="bg-red-50 border border-red-200 rounded-2xl p-8 flex flex-col items-center justify-center text-center max-w-2xl mx-auto mt-10">
+               <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
+                 <svg className="w-8 h-8 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                 </svg>
+               </div>
+               <h2 className="text-2xl font-bold text-red-700 mb-2">Subscription Expired</h2>
+               <p className="text-red-600 mb-6">Your center's subscription has expired. Please upgrade your plan to continue using the DoodhOS platform.</p>
+               <button onClick={() => router.push('/subscription')} className="px-6 py-3 bg-[#FF6B00] text-white rounded-xl font-bold hover:bg-orange-600 transition-colors">
+                 View Subscription Plans
+               </button>
+            </div>
+          ) : (
+            children
+          )}
         </motion.main>
       </div>
     </div>
