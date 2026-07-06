@@ -20,7 +20,7 @@ export default function Home() {
     return (
       <div className="flex h-screen w-full items-center justify-center bg-zinc-50 dark:bg-zinc-900">
         <div className="flex flex-col items-center animate-pulse">
-          <img src="/logo.svg" alt="DoodhOS Logo" className="h-20 w-auto mb-4" />
+          <img src="/logo.svg" alt="DoodhOS Logo" className="h-35 w-auto mb-4" />
           <div className="text-zinc-400 font-medium tracking-wider text-sm">LOADING...</div>
         </div>
       </div>

@@ -93,7 +93,7 @@ export default function AdminLayout({
     return (
       <div className="flex h-screen w-screen items-center justify-center" style={{ background: '#F7F7F7' }}>
         <div className="flex flex-col items-center gap-4">
-          <img src="/logo.svg" alt="DoodhOS Logo" className="h-16 w-auto mb-2 animate-pulse" />
+          <img src="/logo.svg" alt="DoodhOS Logo" className="h-35 w-auto mb-2 animate-pulse" />
           <div className="w-8 h-8 border-2 border-[#FF6B00] border-t-transparent rounded-full animate-spin" />
         </div>
       </div>

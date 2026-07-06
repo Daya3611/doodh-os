@@ -1,5 +1,7 @@
 'use client';
 
+import { Fragment } from 'react';
+
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -10,6 +12,7 @@ import {
   Wallet, FileText, UserCog, Settings,
   LogOut, Droplets,
 } from 'lucide-react';
+import { SheetClose } from '@/components/ui/sheet';
 
 type NavItem = { name: string; href: string; icon: React.ElementType };
 
@@ -32,7 +35,7 @@ const STAFF_ITEMS = ALL_NAV_ITEMS.filter(i =>
   ['/dashboard', '/collections'].includes(i.href)
 );
 
-export function DashboardSidebar() {
+export function DashboardSidebar({ isMobile }: { isMobile?: boolean }) {
   const pathname = usePathname();
   const { profile, signOut } = useAuthStore();
 
@@ -58,8 +61,8 @@ export function DashboardSidebar() {
 
   return (
     <aside
-      className="hidden md:flex flex-col h-screen sticky top-0 flex-shrink-0"
-      style={{ width: 280, background: '#FFFFFF', borderRight: '1px solid #ECECEC' }}
+      className={`${isMobile ? 'flex' : 'hidden md:flex sticky top-0'} flex-col h-screen flex-shrink-0`}
+      style={{ width: isMobile ? '100%' : 280, background: '#FFFFFF', borderRight: isMobile ? 'none' : '1px solid #ECECEC' }}
     >
       {/* Logo */}
       <div className="flex items-center gap-3 px-6 py-5 border-b border-[#ECECEC]">
@@ -72,7 +75,7 @@ export function DashboardSidebar() {
         {navItems.map(item => {
           const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
           const Icon = item.icon;
-          return (
+          const linkContent = (
             <Link key={item.name} href={item.href}>
               <motion.div
                 whileHover={{ scale: 1.01 }}
@@ -101,6 +104,14 @@ export function DashboardSidebar() {
                 </span>
               </motion.div>
             </Link>
+          );
+
+          return isMobile ? (
+            <SheetClose render={linkContent} key={item.name} />
+          ) : (
+            <Fragment key={item.name}>
+              {linkContent}
+            </Fragment>
           );
         })}
       </nav>
