@@ -49,11 +49,13 @@ function TopBar() {
         {/* Mobile Menu Trigger */}
         <div className="md:hidden flex items-center">
           <Sheet>
-            <SheetTrigger asChild>
-              <button className="p-2 -ml-2 text-[#111] hover:bg-black/5 rounded-lg transition-colors">
-                <Menu size={22} />
-              </button>
-            </SheetTrigger>
+            <SheetTrigger 
+              render={
+                <button className="p-2 -ml-2 text-[#111] hover:bg-black/5 rounded-lg transition-colors">
+                  <Menu size={22} />
+                </button>
+              }
+            />
             <SheetContent side="left" className="w-[280px] p-0 border-none bg-white">
               <SheetTitle className="sr-only">Navigation Menu</SheetTitle>
               <SheetDescription className="sr-only">Access the different sections of DoodhOS</SheetDescription>
