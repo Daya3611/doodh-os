@@ -2,9 +2,10 @@
 
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Building2, Receipt, Globe, Bell, Save, Loader2 } from 'lucide-react';
+import { Building2, Receipt, Globe, Bell, Save, Loader2, HardDrive } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
 import { settingsService } from '@/services/settingsService';
+import { backupService } from '@/services/backupService';
 import { toast } from 'sonner';
 
 const cardStyle = { background: '#FFFFFF', borderRadius: '20px', border: '1px solid #ECECEC', boxShadow: '0 1px 4px rgba(0,0,0,0.05)', padding: '24px' };
@@ -15,6 +16,7 @@ const sections = [
   { id: 'center', label: 'Center Info', icon: Building2 },
   { id: 'receipt', label: 'Receipt', icon: Receipt },
   { id: 'notifications', label: 'Notifications', icon: Bell },
+  { id: 'backup', label: 'Backup & Restore', icon: HardDrive },
   { id: 'system', label: 'System', icon: Globe },
 ];
 
@@ -161,6 +163,62 @@ export default function SettingsPage() {
                 <Toggle value={item.value} onChange={item.toggle} />
               </div>
             ))}
+          </div>
+        )}
+
+        {activeSection === 'backup' && (
+          <div className="space-y-5">
+            <div className="text-[16px] font-bold text-[#111111] mb-5">Backup & Database Restore</div>
+            <div className="space-y-4">
+              <div className="p-5 rounded-xl border border-slate-200 bg-white flex items-center justify-between">
+                <div>
+                  <div className="text-[14px] font-bold text-[#111111]">Export Local Database</div>
+                  <div className="text-[12px] text-[#777777] mt-1">Download a JSON snapshot of your collections, ledger transactions, rate charts, and farmers list.</div>
+                </div>
+                <button
+                  onClick={() => {
+                    if (profile?.centerId) {
+                      backupService.exportBackup(profile.centerId);
+                    } else {
+                      toast.error("Center ID not found");
+                    }
+                  }}
+                  className="px-5 py-2.5 rounded-lg text-sm font-semibold bg-[#FFF5EE] text-[#FF6B00] hover:bg-[#FFE8D6] transition-colors"
+                >
+                  Export JSON
+                </button>
+              </div>
+
+              <div className="p-5 rounded-xl border border-slate-200 bg-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div>
+                  <div className="text-[14px] font-bold text-[#111111]">Import Database Snapshot</div>
+                  <div className="text-[12px] text-[#777777] mt-1">Select a previously exported DoodhOS JSON backup file to overwrite local state and queue for sync.</div>
+                </div>
+                <div className="relative">
+                  <input
+                    type="file"
+                    accept=".json"
+                    id="restore-upload"
+                    className="hidden"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (file && profile?.centerId) {
+                        const ok = await backupService.importBackup(file, profile.centerId);
+                        if (ok) {
+                          window.location.reload();
+                        }
+                      }
+                    }}
+                  />
+                  <label
+                    htmlFor="restore-upload"
+                    className="px-5 py-2.5 rounded-lg text-sm font-semibold bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors cursor-pointer inline-block"
+                  >
+                    Select File
+                  </label>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 

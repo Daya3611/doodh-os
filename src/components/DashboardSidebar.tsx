@@ -5,12 +5,13 @@ import { Fragment } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuthStore } from '@/store/useAuthStore';
+import { useTranslation } from '@/context/translationContext';
 import { auth } from '@/firebase/config';
 import { motion } from 'framer-motion';
 import {
   LayoutDashboard, Users, Milk, BarChart3,
   Wallet, FileText, UserCog, Settings,
-  LogOut, Droplets,
+  LogOut, Droplets, Truck, CreditCard, Package
 } from 'lucide-react';
 import { SheetClose } from '@/components/ui/sheet';
 
@@ -21,23 +22,26 @@ const ALL_NAV_ITEMS: NavItem[] = [
   { name: 'Farmers', href: '/farmers', icon: Users },
   { name: 'Collections', href: '/collections', icon: Milk },
   { name: 'Rate Chart', href: '/rate-chart', icon: BarChart3 },
+  { name: 'Dispatch', href: '/dispatch', icon: Truck },
   { name: 'Accounts', href: '/accounts', icon: FileText },
+  { name: 'Udhar Khata', href: '/udhar-khata', icon: CreditCard },
   { name: 'Payments', href: '/payments', icon: Wallet },
-  { name: 'Purchases', href: '/purchases', icon: Droplets },
+  { name: 'Inventory', href: '/inventory', icon: Package },
   { name: 'Reports', href: '/reports', icon: BarChart3 },
   { name: 'Staff', href: '/staff', icon: UserCog },
   { name: 'Subscription', href: '/subscription', icon: Wallet },
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
 
-// Staff can only see Dashboard + Collections
+// Staff can only see Dashboard + Collections + Inventory
 const STAFF_ITEMS = ALL_NAV_ITEMS.filter(i =>
-  ['/dashboard', '/collections'].includes(i.href)
+  ['/dashboard', '/collections', '/inventory'].includes(i.href)
 );
 
 export function DashboardSidebar({ isMobile }: { isMobile?: boolean }) {
   const pathname = usePathname();
   const { profile, signOut } = useAuthStore();
+  const { t } = useTranslation();
 
   const handleLogout = async () => {
     await auth.signOut();
@@ -100,7 +104,7 @@ export function DashboardSidebar({ isMobile }: { isMobile?: boolean }) {
                   className="text-[14px] font-medium leading-none"
                   style={{ color: isActive ? '#111111' : '#666666' }}
                 >
-                  {item.name}
+                  {t('nav.' + item.name.toLowerCase().replace(' ', '_'))}
                 </span>
               </motion.div>
             </Link>

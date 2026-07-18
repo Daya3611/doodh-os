@@ -655,4 +655,507 @@ The experience should prioritize:
 The software must be production-ready, maintainable, scalable, and optimized for real-world usage.
 
 ```
+# AGENTS.md
+
+# DoodhOS Development Guidelines
+
+## Project
+
+DoodhOS is a production-ready Milk Collection Center ERP built with:
+
+- Next.js 16
+- TypeScript
+- Firebase Firestore
+- PWA (Offline First)
+- IndexedDB (Dexie)
+- TailwindCSS
+- ShadCN UI
+- TanStack Query
+
+This is a REAL commercial ERP.
+
+Never generate demo code.
+
+Never generate mock APIs.
+
+Never generate placeholder components.
+
+Every implementation must be production-ready.
+
+---
+
+# Architecture
+
+UI
+
+↓
+
+Repository Layer
+
+↓
+
+IndexedDB (Offline Database)
+
+↓
+
+Sync Service
+
+↓
+
+Firebase Firestore
+
+The UI must NEVER communicate directly with Firebase.
+
+Every write operation must go through the Repository Layer.
+
+---
+
+# Offline First
+
+The application must work completely offline.
+
+Offline supported modules:
+
+- Milk Collection
+- Rate Chart
+- Farmer Lookup
+- Payments
+- Inventory
+- Purchases
+- Sales
+- Reports (Cached)
+
+When offline
+
+Save records into IndexedDB.
+
+Mark records as Pending Sync.
+
+When internet returns
+
+User clicks
+
+Sync Data
+
+↓
+
+Upload pending records
+
+↓
+
+Download latest cloud changes
+
+↓
+
+Update IndexedDB
+
+↓
+
+Mark synced.
+
+Never lose user data.
+
+---
+
+# Data Rules
+
+Never delete user data automatically.
+
+Soft delete wherever possible.
+
+Maintain createdAt
+
+Maintain updatedAt
+
+Maintain syncedAt
+
+Maintain createdBy
+
+Maintain updatedBy
+
+All timestamps should use server timestamps when syncing.
+
+---
+
+# Coding Standards
+
+Always use
+
+TypeScript
+
+Strict typing
+
+Reusable hooks
+
+Reusable services
+
+Reusable repositories
+
+Avoid duplicate logic.
+
+No any type.
+
+No inline business logic inside components.
+
+---
+
+# Firebase
+
+Never call Firestore directly inside React Components.
+
+Always use Repository classes.
+
+Use batch writes whenever possible.
+
+Use transactions where needed.
+
+Never duplicate writes.
+
+---
+
+# IndexedDB
+
+Use Dexie.js.
+
+Never use localStorage for application data.
+
+IndexedDB is the only offline database.
+
+All pending sync records should be stored locally.
+
+---
+
+# PWA
+
+Maintain
+
+Service Worker
+
+Offline Cache
+
+Background Sync
+
+Install Prompt
+
+Cache
+
+Images
+
+Icons
+
+Fonts
+
+Static assets
+
+Never cache Firestore responses directly.
+
+---
+
+# Inventory Rules
+
+Inventory always stores stock in Base Unit.
+
+Example
+
+Cow Feed
+
+Base Unit
+
+KG
+
+Variants
+
+50 KG Bag
+
+25 KG Bag
+
+10 KG Bag
+
+Loose KG
+
+Purchasing
+
+10 Bags
+
+↓
+
+500 KG
+
+Selling
+
+5 Bags
+
+↓
+
+250 KG
+
+Stock should always remain accurate.
+
+---
+
+# Milk Collection
+
+Features
+
+Morning Shift
+
+Evening Shift
+
+Cow
+
+Buffalo
+
+Nearest FAT/SNF Matching
+
+Duplicate Detection
+
+Collection Editing
+
+Automatic Rate Calculation
+
+Offline Collection
+
+Automatic Sync
+
+---
+
+# Rate Chart
+
+Support
+
+Effective Date
+
+History
+
+Password Protection
+
+Nearest Matching
+
+Future Rate Changes
+
+Audit Log
+
+---
+
+# Payments
+
+Support
+
+Weekly Bills
+
+10 Day Bills
+
+Custom Bills
+
+Manual Deductions
+
+Milk Damage
+
+Advance
+
+Penalty
+
+Other
+
+---
+
+# Reports
+
+Support
+
+Today
+
+Yesterday
+
+7 Days
+
+30 Days
+
+Financial Year
+
+All Time
+
+Custom Date Range
+
+One global filter should update every report and dashboard.
+
+---
+
+# Dashboard
+
+Cards
+
+Charts
+
+Revenue
+
+Collection
+
+Payments
+
+Inventory
+
+Animal Distribution
+
+Recent Collections
+
+Everything should use the global dashboard filter.
+
+---
+
+# UI
+
+Use
+
+TailwindCSS
+
+ShadCN
+
+Responsive Layout
+
+Professional ERP Design
+
+Keyboard Friendly
+
+Loading States
+
+Empty States
+
+Skeleton Loaders
+
+Proper Error Handling
+
+---
+
+# Error Handling
+
+Never silently fail.
+
+Show meaningful messages.
+
+Retry failed operations.
+
+Log synchronization failures.
+
+---
+
+# Security
+
+Use Firebase Authentication.
+
+Protect routes.
+
+Validate permissions.
+
+Never trust client input.
+
+---
+
+# Performance
+
+Lazy load heavy modules.
+
+Virtualize large tables.
+
+Paginate reports.
+
+Optimize Firestore queries.
+
+Avoid unnecessary re-renders.
+
+---
+
+# Folder Structure
+
+src/
+
+components/
+
+hooks/
+
+repositories/
+
+services/
+
+lib/
+
+store/
+
+types/
+
+utils/
+
+app/
+
+Never place business logic inside UI components.
+
+---
+
+# Before Every Feature
+
+Ensure
+
+✓ Offline Support
+
+✓ Sync Support
+
+✓ Responsive Design
+
+✓ Type Safety
+
+✓ Firestore Rules
+
+✓ IndexedDB Support
+
+✓ Loading State
+
+✓ Error State
+
+✓ Success State
+
+✓ Production Ready
+
+---
+
+# Never Do
+
+❌ Demo Code
+
+❌ Mock APIs
+
+❌ Fake Delays
+
+❌ Placeholder Functions
+
+❌ Duplicate Logic
+
+❌ Direct Firebase Calls in Components
+
+❌ localStorage for ERP Data
+
+❌ Breaking Existing Features
+
+---
+
+# Always Do
+
+✔ Production Code
+
+✔ Clean Architecture
+
+✔ Reusable Components
+
+✔ Strong Typing
+
+✔ Offline First
+
+✔ IndexedDB
+
+✔ Firebase Sync
+
+✔ Responsive UI
+
+✔ Performance Optimized
+
+✔ Enterprise-Level Code Quality
 ```

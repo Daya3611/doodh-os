@@ -4,7 +4,9 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/useAuthStore';
 import { farmerService } from '@/services/farmerService';
-import { Farmer } from '@/types';
+import { ledgerService } from '@/services/ledgerService';
+import { Farmer, LedgerEntry } from '@/types';
+import { calculateFarmerBalance } from '@/lib/balance';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, ChevronRight, Wallet, ArrowUpRight, ArrowDownRight, FileText } from 'lucide-react';
@@ -20,6 +22,7 @@ export default function AccountsPage() {
   const centerId = profile?.centerId;
 
   const [farmers, setFarmers] = useState<Farmer[]>([]);
+  const [ledgers, setLedgers] = useState<LedgerEntry[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [isLoading, setIsLoading] = useState(true);
 
@@ -27,8 +30,12 @@ export default function AccountsPage() {
     if (!centerId) return;
     setIsLoading(true);
     try {
-      const data = await farmerService.getAll(centerId);
-      setFarmers(data);
+      const [farmersData, ledgerData] = await Promise.all([
+        farmerService.getAll(centerId),
+        ledgerService.getAll(centerId)
+      ]);
+      setFarmers(farmersData);
+      setLedgers(ledgerData);
     } catch { toast.error('Failed to load accounts'); }
     finally { setIsLoading(false); }
   };
@@ -40,10 +47,27 @@ export default function AccountsPage() {
     f.id.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  // Group ledger entries by farmer ID
+  const ledgerMap = new Map<string, LedgerEntry[]>();
+  ledgers.forEach(l => {
+    if (!ledgerMap.has(l.farmerId)) {
+      ledgerMap.set(l.farmerId, []);
+    }
+    ledgerMap.get(l.farmerId)!.push(l);
+  });
+
+  // Calculate correct balance for each farmer using calculateFarmerBalance
+  const farmerBalances = new Map<string, number>();
+  farmers.forEach(f => {
+    const transactions = ledgerMap.get(f.id) || [];
+    const { balance } = calculateFarmerBalance(transactions);
+    farmerBalances.set(f.id, balance);
+  });
+
   // Calculate totals
-  const totalOutstanding = farmers.reduce((sum, f) => sum + (f.balance || 0), 0);
-  const positiveBalances = farmers.filter(f => (f.balance || 0) > 0).reduce((sum, f) => sum + (f.balance || 0), 0);
-  const negativeBalances = farmers.filter(f => (f.balance || 0) < 0).reduce((sum, f) => sum + Math.abs(f.balance || 0), 0);
+  const totalOutstanding = farmers.reduce((sum, f) => sum + (farmerBalances.get(f.id) || 0), 0);
+  const positiveBalances = farmers.filter(f => (farmerBalances.get(f.id) || 0) > 0).reduce((sum, f) => sum + (farmerBalances.get(f.id) || 0), 0);
+  const negativeBalances = farmers.filter(f => (farmerBalances.get(f.id) || 0) < 0).reduce((sum, f) => sum + Math.abs(farmerBalances.get(f.id) || 0), 0);
 
   return (
     <div className="space-y-5">
@@ -130,7 +154,7 @@ export default function AccountsPage() {
               ) : (
                 <AnimatePresence>
                   {filtered.map((farmer, i) => {
-                    const balance = farmer.balance || 0;
+                    const balance = farmerBalances.get(farmer.id) || 0;
                     return (
                       <motion.tr
                         key={farmer.id}

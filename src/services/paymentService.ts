@@ -1,9 +1,11 @@
 import { db } from '@/firebase/config';
 import {
-  collection, doc, getDocs, setDoc, deleteDoc,
-  query, where, serverTimestamp, orderBy, Timestamp, runTransaction
+  collection, doc, getDoc, getDocs, setDoc, deleteDoc,
+  query, where, serverTimestamp, orderBy, Timestamp, runTransaction, writeBatch
 } from 'firebase/firestore';
 import { z } from 'zod';
+import { recalculateAndSyncFarmerBalance } from '@/lib/balance';
+import { LedgerEntry } from '@/types';
 
 export const paymentSchema = z.object({
   farmerId: z.string().min(1),
@@ -50,7 +52,7 @@ export const paymentService = {
   },
 
   add: async (centerId: string, data: PaymentFormData, createdBy: string): Promise<string> => {
-    return await runTransaction(db, async (tx) => {
+    const newId = await runTransaction(db, async (tx) => {
       // 1. Get the farmer to update balance
       const farmerRef = doc(db, 'centers', centerId, 'farmers', data.farmerId);
       const farmerDoc = await tx.get(farmerRef);
@@ -86,44 +88,43 @@ export const paymentService = {
 
       return ref.id;
     });
+
+    // Recalculate running balances and update farmer document
+    await recalculateAndSyncFarmerBalance(centerId, data.farmerId);
+
+    return newId;
   },
 
   delete: async (centerId: string, id: string): Promise<void> => {
-    await runTransaction(db, async (tx) => {
-      // 1. Get the payment to know how much to reverse
-      const pmtRef = doc(paymentService.getCollectionRef(centerId), id);
-      const pmtDoc = await tx.get(pmtRef);
-      if (!pmtDoc.exists()) throw new Error('Payment not found');
-      
-      const pmtData = pmtDoc.data() as PaymentFormData;
-      
-      // 2. Get the farmer
-      const farmerRef = doc(db, 'centers', centerId, 'farmers', pmtData.farmerId);
-      const farmerDoc = await tx.get(farmerRef);
-      
-      if (farmerDoc.exists()) {
-        const currentBalance = farmerDoc.data().balance || 0;
-        const newBalance = currentBalance + pmtData.amount; // Reverse debit
-        
-        // 3. Create adjusting ledger entry
-        const ledgerRef = doc(collection(db, 'centers', centerId, 'ledger'));
-        tx.set(ledgerRef, {
-          farmerId: pmtData.farmerId,
-          transactionType: 'adjustment',
-          description: `Deleted Payment ${id}`,
-          credit: pmtData.amount, // Crediting what was previously debited
-          debit: 0,
-          balance: newBalance,
-          referenceId: id,
-          createdAt: serverTimestamp(),
-        });
-        
-        // 4. Update farmer balance
-        tx.update(farmerRef, { balance: newBalance });
-      }
+    // 1. Get the payment to know how much to reverse
+    const pmtRef = doc(paymentService.getCollectionRef(centerId), id);
+    const pmtDoc = await getDoc(pmtRef);
+    if (!pmtDoc.exists()) throw new Error('Payment not found');
+    
+    const pmtData = pmtDoc.data() as Payment;
+    const farmerId = pmtData.farmerId;
 
-      // 5. Delete the payment
-      tx.delete(pmtRef);
+    // Get the corresponding ledger entry referencing this payment
+    const ledgerCollectionRef = collection(db, 'centers', centerId, 'ledger');
+    const ledgerQuery = query(ledgerCollectionRef, where('farmerId', '==', farmerId));
+    const ledgerSnap = await getDocs(ledgerQuery);
+
+    const batch = writeBatch(db);
+
+    // Delete the payment document
+    batch.delete(pmtRef);
+
+    // Delete the corresponding ledger entry
+    ledgerSnap.docs.forEach(docSnap => {
+      const entry = docSnap.data() as LedgerEntry;
+      if (entry.referenceId === id && entry.transactionType === 'payment') {
+        batch.delete(docSnap.ref);
+      }
     });
+
+    await batch.commit();
+
+    // Recalculate running balances and update farmer document
+    await recalculateAndSyncFarmerBalance(centerId, farmerId);
   },
 };

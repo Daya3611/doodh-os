@@ -10,6 +10,10 @@ import { Bell, Menu } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { subscriptionService, CenterSubscription } from '@/services/subscriptionService';
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from '@/components/ui/sheet';
+import { SyncStatusIndicator } from '@/components/SyncStatusIndicator';
+import { ConflictResolver } from '@/components/ConflictResolver';
+import { useSyncStore } from '@/store/useSyncStore';
+import { TranslationProvider } from '@/context/translationContext';
 
 // Page title mapping
 const pageTitles: Record<string, { title: string; subtitle: string }> = {
@@ -18,11 +22,24 @@ const pageTitles: Record<string, { title: string; subtitle: string }> = {
   '/collections': { title: 'Collections', subtitle: 'Daily milk collection records' },
   '/collections/new': { title: 'New Collection', subtitle: 'Fast data entry mode for milk collection' },
   '/rate-chart': { title: 'Rate Chart', subtitle: 'Manage milk rates based on FAT and SNF parameters' },
+  '/dispatch': { title: 'Dairy Dispatch', subtitle: 'Record bulk dispatches and track plant receipt losses' },
   '/payments': { title: 'Payments', subtitle: 'Track and manage farmer payments' },
+  '/udhar-khata': { title: 'Udhar Khata', subtitle: 'Manage outstanding farmer credit balances and recoveries' },
   '/reports': { title: 'Reports', subtitle: 'Collection analytics and financial reports' },
   '/staff': { title: 'Staff', subtitle: 'Manage collection center staff and roles' },
   '/subscription': { title: 'Subscription', subtitle: 'Manage your DoodhOS plan, add-ons, and billing' },
   '/settings': { title: 'Settings', subtitle: 'Configure your center preferences' },
+  '/inventory': { title: 'Inventory Dashboard', subtitle: 'Overview of stock value, levels, and activity' },
+  '/inventory/items': { title: 'Item Catalog', subtitle: 'Manage products, units, brands, and variants' },
+  '/inventory/categories': { title: 'Product Categories', subtitle: 'Group inventory products into distinct categories' },
+  '/inventory/brands': { title: 'Product Brands', subtitle: 'Manage product brands and manufacturers' },
+  '/inventory/units': { title: 'Measurement Units', subtitle: 'Manage units of measurement for product counts' },
+  '/inventory/suppliers': { title: 'Suppliers', subtitle: 'Manage suppliers, statements, and outstandings' },
+  '/inventory/purchases': { title: 'Purchase Entry', subtitle: 'Record product inward receipts and increase stock' },
+  '/inventory/sales': { title: 'Sales Invoice', subtitle: 'Record customer purchases and decrease stock' },
+  '/inventory/adjustments': { title: 'Stock Adjustments', subtitle: 'Reconcile stock quantities for damage, theft, or returns' },
+  '/inventory/reports': { title: 'Inventory Reports', subtitle: 'Generate stock levels, purchase, sales, and margin statements' },
+  '/inventory/settings': { title: 'Inventory Settings', subtitle: 'Configure stock parameters and presets' },
 };
 
 function TopBar() {
@@ -75,6 +92,9 @@ function TopBar() {
         {/* Search */}
         <GlobalSearch />
 
+        {/* Sync Status Indicator */}
+        <SyncStatusIndicator />
+
         {/* Notifications */}
         <motion.button
           onClick={() => {
@@ -116,14 +136,42 @@ export default function DashboardLayout({
   const [mounted, setMounted] = useState(false);
   const [subscription, setSubscription] = useState<CenterSubscription | null>(null);
 
+  // Network restoration monitoring
+  const { isOnline, pendingCount, syncNow } = useSyncStore();
+  const [prevOnline, setPrevOnline] = useState<boolean | null>(null);
+
   useEffect(() => {
     setMounted(true);
   }, []);
 
   useEffect(() => {
+    if (prevOnline === false && isOnline === true) {
+      import('sonner').then(({ toast }) => {
+        toast.info('Internet connection restored.', {
+          description: `You have ${pendingCount} pending records.`,
+          action: {
+            label: 'Sync Now',
+            onClick: () => {
+              if (profile?.centerId) syncNow(profile.centerId);
+            }
+          },
+          duration: 15000
+        });
+      });
+    }
+    if (isOnline !== prevOnline) {
+      setPrevOnline(isOnline);
+    }
+  }, [isOnline, pendingCount, profile?.centerId, syncNow, prevOnline]);
+
+  useEffect(() => {
     if (profile?.centerId) {
       subscriptionService.getSubscription(profile.centerId).then(sub => {
         setSubscription(sub);
+      });
+      // Check for auto-backup daily reminder
+      import('@/services/backupService').then(({ backupService }) => {
+        backupService.checkAutoBackup(profile.centerId!);
       });
     }
   }, [profile?.centerId]);
@@ -147,38 +195,43 @@ export default function DashboardLayout({
   const isSubscriptionPage = pathname === '/subscription';
 
   return (
-    <div className="flex h-screen overflow-hidden" style={{ background: '#F7F7F7' }}>
-      {/* Sidebar */}
-      <DashboardSidebar />
+    <TranslationProvider>
+      <div className="flex h-screen overflow-hidden" style={{ background: '#F7F7F7' }}>
+        {/* Sidebar */}
+        <DashboardSidebar />
 
-      {/* Main */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <TopBar />
-        <motion.main
-          className="flex-1 overflow-y-auto"
-          style={{ padding: '32px' }}
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.2, ease: 'easeOut' }}
-        >
-          {isExpired && !isSubscriptionPage ? (
-            <div className="bg-red-50 border border-red-200 rounded-2xl p-8 flex flex-col items-center justify-center text-center max-w-2xl mx-auto mt-10">
-              <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
-                <svg className="w-8 h-8 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
+        {/* Main */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <TopBar />
+          <motion.main
+            className="flex-1 overflow-y-auto"
+            style={{ padding: '32px' }}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+          >
+            {isExpired && !isSubscriptionPage ? (
+              <div className="bg-red-50 border border-red-200 rounded-2xl p-8 flex flex-col items-center justify-center text-center max-w-2xl mx-auto mt-10">
+                <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
+                  <svg className="w-8 h-8 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                </div>
+                <h2 className="text-2xl font-bold text-red-700 mb-2">Subscription Expired</h2>
+                <p className="text-red-600 mb-6">Your center's subscription has expired. Please upgrade your plan to continue using the DoodhOS platform.</p>
+                <button onClick={() => router.push('/subscription')} className="px-6 py-3 bg-[#FF6B00] text-white rounded-xl font-bold hover:bg-orange-600 transition-colors">
+                  View Subscription Plans
+                </button>
               </div>
-              <h2 className="text-2xl font-bold text-red-700 mb-2">Subscription Expired</h2>
-              <p className="text-red-600 mb-6">Your center's subscription has expired. Please upgrade your plan to continue using the DoodhOS platform.</p>
-              <button onClick={() => router.push('/subscription')} className="px-6 py-3 bg-[#FF6B00] text-white rounded-xl font-bold hover:bg-orange-600 transition-colors">
-                View Subscription Plans
-              </button>
-            </div>
-          ) : (
-            children
-          )}
-        </motion.main>
+            ) : (
+              <>
+                {children}
+                <ConflictResolver />
+              </>
+            )}
+          </motion.main>
+        </div>
       </div>
-    </div>
+    </TranslationProvider>
   );
 }

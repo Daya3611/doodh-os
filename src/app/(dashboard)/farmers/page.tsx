@@ -5,7 +5,9 @@ import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/useAuthStore';
 import { farmerService } from '@/services/farmerService';
 import { collectionService } from '@/services/collectionService';
+import { ledgerService } from '@/services/ledgerService';
 import { Farmer, Collection } from '@/types';
+import { calculateFarmerBalance } from '@/lib/balance';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, Search, MoreHorizontal, User as UserIcon, Wallet, Droplets, Book, Ban, Trash2, Edit } from 'lucide-react';
@@ -37,6 +39,7 @@ export default function FarmersPage() {
   const [selectedFarmer, setSelectedFarmer] = useState<Farmer | null>(null);
   const [isSheetOpen, setIsSheetOpen] = useState(false);
   const [farmerCollections, setFarmerCollections] = useState<Collection[]>([]);
+  const [selectedFarmerBalance, setSelectedFarmerBalance] = useState<number | null>(null);
   const [isLoadingSheet, setIsLoadingSheet] = useState(false);
 
   const loadFarmers = async () => {
@@ -67,10 +70,19 @@ export default function FarmersPage() {
   useEffect(() => {
     if (selectedFarmer && centerId) {
       setIsLoadingSheet(true);
-      collectionService.getByFarmer(centerId, selectedFarmer.id)
-        .then(cols => setFarmerCollections(cols))
-        .catch(() => toast.error("Failed to load collections"))
+      Promise.all([
+        collectionService.getByFarmer(centerId, selectedFarmer.id),
+        ledgerService.getByFarmer(centerId, selectedFarmer.id)
+      ])
+        .then(([cols, ledgers]) => {
+          setFarmerCollections(cols);
+          const { balance } = calculateFarmerBalance(ledgers);
+          setSelectedFarmerBalance(balance);
+        })
+        .catch(() => toast.error("Failed to load details"))
         .finally(() => setIsLoadingSheet(false));
+    } else {
+      setSelectedFarmerBalance(null);
     }
   }, [selectedFarmer, centerId]);
 
@@ -351,9 +363,14 @@ export default function FarmersPage() {
                   <div className="grid grid-cols-2 gap-3">
                     <div className="bg-white border border-[#ECECEC] rounded-xl p-4">
                       <div className="text-[11px] text-[#777] mb-1 font-semibold uppercase tracking-wider">Current Balance</div>
-                      <div className="text-[18px] font-bold" style={{ color: selectedFarmer.balance >= 0 ? '#16A34A' : '#DC2626' }}>
-                        {selectedFarmer.balance >= 0 ? '+' : '-'}₹{Math.abs(selectedFarmer.balance || 0).toFixed(2)}
-                      </div>
+                      {(() => {
+                        const balance = selectedFarmerBalance !== null ? selectedFarmerBalance : (selectedFarmer.balance || 0);
+                        return (
+                          <div className="text-[18px] font-bold" style={{ color: balance >= 0 ? '#16A34A' : '#DC2626' }}>
+                            {balance >= 0 ? '+' : '-'}₹{Math.abs(balance).toFixed(2)}
+                          </div>
+                        );
+                      })()}
                     </div>
                     <div className="bg-white border border-[#ECECEC] rounded-xl p-4">
                       <div className="text-[11px] text-[#777] mb-1 font-semibold uppercase tracking-wider">Total Collection</div>

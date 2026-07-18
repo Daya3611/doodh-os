@@ -4,6 +4,7 @@ import {
   serverTimestamp, runTransaction, orderBy,
 } from 'firebase/firestore';
 import { Farmer, FarmerFormData } from '@/types';
+import { offlineDb } from '@/lib/offlineDb';
 
 /**
  * Generates next sequential farmer ID (F001, F002, ...) using a Firestore
@@ -39,20 +40,57 @@ export const farmerService = {
     collection(db, 'centers', centerId, 'farmers'),
 
   getAll: async (centerId: string): Promise<Farmer[]> => {
-    const q = query(
-      farmerService.getCollectionRef(centerId),
-      orderBy('createdAt', 'desc')
-    );
-    const snapshot = await getDocs(q);
-    return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Farmer));
+    if (typeof window !== 'undefined' && navigator.onLine) {
+      try {
+        const q = query(
+          farmerService.getCollectionRef(centerId),
+          orderBy('createdAt', 'desc')
+        );
+        const snapshot = await getDocs(q);
+        const cloudFarmers = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Farmer));
+        
+        // Cache in background
+        const syncTime = Date.now();
+        for (const f of cloudFarmers) {
+          await offlineDb.farmers.put({
+            ...f,
+            centerId,
+            localUpdatedAt: syncTime
+          });
+        }
+        return cloudFarmers;
+      } catch (err) {
+        console.warn("Failed to fetch farmers online, using local cache:", err);
+      }
+    }
+
+    // Load from IndexedDB
+    return await offlineDb.farmers.where('centerId').equals(centerId).toArray();
   },
 
   getById: async (centerId: string, farmerId: string): Promise<Farmer | null> => {
-    const snapshot = await getDocs(
-      query(farmerService.getCollectionRef(centerId))
-    );
-    const found = snapshot.docs.find(d => d.id === farmerId);
-    return found ? ({ id: found.id, ...found.data() } as Farmer) : null;
+    if (typeof window !== 'undefined' && navigator.onLine) {
+      try {
+        const snapshot = await getDocs(
+          query(farmerService.getCollectionRef(centerId))
+        );
+        const found = snapshot.docs.find(d => d.id === farmerId);
+        if (found) {
+          const f = { id: found.id, ...found.data() } as Farmer;
+          await offlineDb.farmers.put({
+            ...f,
+            centerId,
+            localUpdatedAt: Date.now()
+          });
+          return f;
+        }
+      } catch (err) {
+        console.warn("Failed to fetch farmer by ID online, using local cache:", err);
+      }
+    }
+
+    const local = await offlineDb.farmers.get(farmerId);
+    return local || null;
   },
 
   add: async (centerId: string, data: FarmerFormData): Promise<string> => {

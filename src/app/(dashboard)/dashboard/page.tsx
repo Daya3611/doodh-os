@@ -5,11 +5,13 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { collectionService } from '@/services/collectionService';
 import { farmerService } from '@/services/farmerService';
 import { paymentService } from '@/services/paymentService';
-import { Collection } from '@/types';
+import { ledgerService } from '@/services/ledgerService';
+import { Collection, LedgerEntry, Farmer } from '@/types';
+import { calculateFarmerBalance } from '@/lib/balance';
 import { motion } from 'framer-motion';
 import { Droplets, TrendingUp, Users, Wallet, ArrowUpRight, ArrowDownRight, Activity } from 'lucide-react';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar } from 'recharts';
-import { format, subDays, isSameDay } from 'date-fns';
+import { format, subDays, isSameDay, startOfDay, endOfDay, differenceInDays, eachDayOfInterval } from 'date-fns';
 
 export default function DashboardPage() {
   const { profile } = useAuthStore();
@@ -17,100 +19,225 @@ export default function DashboardPage() {
   const firstName = profile?.name?.split(' ')[0] || 'there';
 
   const [isLoading, setIsLoading] = useState(true);
-  
+
+  // Stats
+  // const [isLoading, setIsLoading] = useState(true);
+
+  // Raw Data States
+  const [rawCollections, setRawCollections] = useState<Collection[]>([]);
+  const [rawFarmers, setRawFarmers] = useState<Farmer[]>([]);
+  const [rawLedgers, setRawLedgers] = useState<LedgerEntry[]>([]);
+
+  // Filter States
+  const [filterType, setFilterType] = useState<'today' | 'yesterday' | 'week' | 'month' | 'fy' | 'all' | 'custom'>('week');
+  const [customStart, setCustomStart] = useState(format(subDays(new Date(), 6), 'yyyy-MM-dd'));
+  const [customEnd, setCustomEnd] = useState(format(new Date(), 'yyyy-MM-dd'));
+
   // Stats
   const [todayLiters, setTodayLiters] = useState(0);
   const [totalFarmers, setTotalFarmers] = useState(0);
   const [todayRevenue, setTodayRevenue] = useState(0);
-  const [pendingDues, setPendingDues] = useState(0);
-  
+  const [totalOutstanding, setTotalOutstanding] = useState(0);
+  const [totalPayables, setTotalPayables] = useState(0);
+  const [totalReceivables, setTotalReceivables] = useState(0);
+
   // Charts
-  const [weeklyData, setWeeklyData] = useState<{name: string, liters: number, amount: number}[]>([]);
-  const [animalData, setAnimalData] = useState<{name: string, cow: number, buffalo: number}[]>([]);
-  
+  const [weeklyData, setWeeklyData] = useState<{ name: string, liters: number, amount: number }[]>([]);
+  const [animalData, setAnimalData] = useState<{ name: string, cow: number, buffalo: number }[]>([]);
+
   // Recent
   const [recentCols, setRecentCols] = useState<Collection[]>([]);
 
+  // Fetch once on mount
   useEffect(() => {
     if (!centerId) return;
 
-    const loadData = async () => {
+    const loadRawData = async () => {
       try {
-        const [collections, farmers, payments] = await Promise.all([
+        setIsLoading(true);
+        const [collections, farmers, ledgers] = await Promise.all([
           collectionService.getAll(centerId),
           farmerService.getAll(centerId),
-          paymentService.getAll(centerId)
+          ledgerService.getAll(centerId)
         ]);
-
-        const today = new Date();
-
-        // Total farmers
-        setTotalFarmers(farmers.length);
-
-        // Today's collections
-        const todaysCols = collections.filter(c => {
-          if (!c.createdAt) return false;
-          const d = (c.createdAt as any).toDate ? (c.createdAt as any).toDate() : new Date(c.createdAt as any);
-          return isSameDay(d, today);
-        });
-
-        setTodayLiters(todaysCols.reduce((sum, c) => sum + c.liters, 0));
-        setTodayRevenue(todaysCols.reduce((sum, c) => sum + c.totalAmount, 0));
-
-        // Pending Dues (Total Earned - Total Paid)
-        const totalEarned = collections.reduce((sum, c) => sum + c.totalAmount, 0);
-        const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
-        setPendingDues(totalEarned - totalPaid);
-
-        // Recent Collections (Top 5)
-        setRecentCols(collections.slice(0, 5));
-
-        // Prepare Weekly Data (last 7 days)
-        const days = Array.from({length: 7}).map((_, i) => subDays(today, 6 - i));
-        
-        const wData = days.map(d => {
-          const colsForDay = collections.filter(c => {
-            if (!c.createdAt) return false;
-            const cd = (c.createdAt as any).toDate ? (c.createdAt as any).toDate() : new Date(c.createdAt as any);
-            return isSameDay(cd, d);
-          });
-          return {
-            name: format(d, 'EEE'),
-            liters: colsForDay.reduce((s, c) => s + c.liters, 0),
-            amount: colsForDay.reduce((s, c) => s + c.totalAmount, 0),
-          };
-        });
-        setWeeklyData(wData);
-
-        const aData = days.map(d => {
-          const colsForDay = collections.filter(c => {
-            if (!c.createdAt) return false;
-            const cd = (c.createdAt as any).toDate ? (c.createdAt as any).toDate() : new Date(c.createdAt as any);
-            return isSameDay(cd, d);
-          });
-          return {
-            name: format(d, 'EEE'),
-            cow: colsForDay.filter(c => c.animalType === 'cow').reduce((s, c) => s + c.liters, 0),
-            buffalo: colsForDay.filter(c => c.animalType === 'buffalo').reduce((s, c) => s + c.liters, 0),
-          };
-        });
-        setAnimalData(aData);
-
+        setRawCollections(collections);
+        setRawFarmers(farmers);
+        setRawLedgers(ledgers);
       } catch (err) {
-        console.error("Failed to load dashboard data", err);
+        console.error("Failed to load dashboard raw data", err);
       } finally {
         setIsLoading(false);
       }
     };
 
-    loadData();
+    loadRawData();
   }, [centerId]);
+
+  // Dynamic filter processing
+  useEffect(() => {
+    if (rawCollections.length === 0 && rawFarmers.length === 0 && rawLedgers.length === 0) {
+      return;
+    }
+
+    const now = new Date();
+    let startDate = subDays(now, 6);
+    let endDate = now;
+
+    if (filterType === 'today') {
+      startDate = startOfDay(now);
+      endDate = endOfDay(now);
+    } else if (filterType === 'yesterday') {
+      const yesterday = subDays(now, 1);
+      startDate = startOfDay(yesterday);
+      endDate = endOfDay(yesterday);
+    } else if (filterType === 'week') {
+      startDate = startOfDay(subDays(now, 6));
+      endDate = endOfDay(now);
+    } else if (filterType === 'month') {
+      startDate = startOfDay(subDays(now, 29));
+      endDate = endOfDay(now);
+    } else if (filterType === 'fy') {
+      const currentYear = now.getFullYear();
+      const fyStartYear = now.getMonth() >= 3 ? currentYear : currentYear - 1;
+      startDate = new Date(fyStartYear, 3, 1, 0, 0, 0, 0);
+      endDate = endOfDay(now);
+    } else if (filterType === 'all') {
+      startDate = new Date(0);
+      endDate = endOfDay(now);
+    } else if (filterType === 'custom') {
+      startDate = startOfDay(new Date(customStart));
+      endDate = endOfDay(new Date(customEnd));
+    }
+
+    const getMillis = (val: any) => {
+      if (!val) return 0;
+      if (val.toMillis) return val.toMillis();
+      return new Date(val).getTime();
+    };
+
+    const startMs = startDate.getTime();
+    const endMs = endDate.getTime();
+
+    // 1. Filter Collections
+    const filteredCols = rawCollections.filter(c => {
+      const t = getMillis(c.createdAt);
+      return t >= startMs && t <= endMs;
+    });
+
+    // 2. Filter Ledgers
+    const filteredLedgers = rawLedgers.filter(l => {
+      const t = getMillis(l.createdAt);
+      return t >= startMs && t <= endMs;
+    });
+
+    // 3. Compute Metrics
+    setTodayLiters(filteredCols.reduce((sum, c) => sum + c.liters, 0));
+    setTodayRevenue(filteredCols.reduce((sum, c) => sum + c.totalAmount, 0));
+    setTotalFarmers(rawFarmers.length);
+
+    // Group Ledger by Farmer
+    const ledgerMap = new Map<string, LedgerEntry[]>();
+    filteredLedgers.forEach(l => {
+      if (!ledgerMap.has(l.farmerId)) {
+        ledgerMap.set(l.farmerId, []);
+      }
+      ledgerMap.get(l.farmerId)!.push(l);
+    });
+
+    let outstandingSum = 0;
+    let payablesSum = 0;
+    let receivablesSum = 0;
+
+    rawFarmers.forEach(f => {
+      const transactions = ledgerMap.get(f.id) || [];
+      const { balance } = calculateFarmerBalance(transactions);
+      outstandingSum += balance;
+      if (balance > 0) {
+        payablesSum += balance;
+      } else if (balance < 0) {
+        receivablesSum += Math.abs(balance);
+      }
+    });
+
+    setTotalOutstanding(outstandingSum);
+    setTotalPayables(payablesSum);
+    setTotalReceivables(receivablesSum);
+
+    // Recent Collections (Top 5)
+    setRecentCols(filteredCols.slice(0, 5));
+
+    // 4. Generate Chart points based on range size
+    const diffDays = differenceInDays(endDate, startDate);
+
+    if (diffDays <= 31) {
+      const days = eachDayOfInterval({ start: startDate, end: endDate });
+
+      const wData = days.map(d => {
+        const colsForDay = filteredCols.filter(c => isSameDay(new Date(getMillis(c.createdAt)), d));
+        return {
+          name: format(d, 'dd MMM'),
+          liters: colsForDay.reduce((s, c) => s + c.liters, 0),
+          amount: colsForDay.reduce((s, c) => s + c.totalAmount, 0),
+        };
+      });
+      setWeeklyData(wData);
+
+      const aData = days.map(d => {
+        const colsForDay = filteredCols.filter(c => isSameDay(new Date(getMillis(c.createdAt)), d));
+        return {
+          name: format(d, 'dd MMM'),
+          cow: colsForDay.filter(c => c.animalType === 'cow').reduce((s, c) => s + c.liters, 0),
+          buffalo: colsForDay.filter(c => c.animalType === 'buffalo').reduce((s, c) => s + c.liters, 0),
+        };
+      });
+      setAnimalData(aData);
+    } else {
+      const monthsMap = new Map<string, Date>();
+      let curr = new Date(startDate);
+      while (curr <= endDate) {
+        const key = format(curr, 'yyyy-MM');
+        if (!monthsMap.has(key)) {
+          monthsMap.set(key, new Date(curr));
+        }
+        curr.setDate(curr.getDate() + 5);
+      }
+      const sortedMonths = Array.from(monthsMap.values()).sort((a, b) => a.getTime() - b.getTime());
+
+      const wData = sortedMonths.map(m => {
+        const colsForMonth = filteredCols.filter(c => {
+          const d = new Date(getMillis(c.createdAt));
+          return d.getFullYear() === m.getFullYear() && d.getMonth() === m.getMonth();
+        });
+        return {
+          name: format(m, 'MMM yy'),
+          liters: colsForMonth.reduce((s, c) => s + c.liters, 0),
+          amount: colsForMonth.reduce((s, c) => s + c.totalAmount, 0),
+        };
+      });
+      setWeeklyData(wData);
+
+      const aData = sortedMonths.map(m => {
+        const colsForMonth = filteredCols.filter(c => {
+          const d = new Date(getMillis(c.createdAt));
+          return d.getFullYear() === m.getFullYear() && d.getMonth() === m.getMonth();
+        });
+        return {
+          name: format(m, 'MMM yy'),
+          cow: colsForMonth.filter(c => c.animalType === 'cow').reduce((s, c) => s + c.liters, 0),
+          buffalo: colsForMonth.filter(c => c.animalType === 'buffalo').reduce((s, c) => s + c.liters, 0),
+        };
+      });
+      setAnimalData(aData);
+    }
+  }, [rawCollections, rawFarmers, rawLedgers, filterType, customStart, customEnd]);
 
   const summaryCards = [
     { title: "Today's Collection", value: `${todayLiters.toFixed(1)} L`, sub: 'Liters collected today', icon: Droplets, color: '#FF6B00', bg: '#FFF3E8' },
     { title: 'Total Farmers', value: totalFarmers.toString(), sub: 'Registered active farmers', icon: Users, color: '#22C55E', bg: '#DCFCE7' },
     { title: 'Revenue Today', value: `₹${todayRevenue.toFixed(0)}`, sub: 'Total payout today', icon: TrendingUp, color: '#3B82F6', bg: '#DBEAFE' },
-    { title: 'Pending Dues', value: `₹${pendingDues.toFixed(0)}`, sub: 'Total pending balance', icon: Wallet, color: '#EF4444', bg: '#FEE2E2' },
+    { title: 'Total Outstanding', value: `₹${totalOutstanding.toFixed(0)}`, sub: 'Net outstanding balance', icon: Wallet, color: '#FF6B00', bg: '#FFF3E8' },
+    { title: 'Payable to Farmers', value: `₹${totalPayables.toFixed(0)}`, sub: 'Total we owe farmers', icon: ArrowUpRight, color: '#22C55E', bg: '#DCFCE7' },
+    { title: 'Receivable from Farmers', value: `₹${totalReceivables.toFixed(0)}`, sub: 'Total farmers owe us', icon: ArrowDownRight, color: '#EF4444', bg: '#FEE2E2' },
   ];
 
   if (isLoading) {
@@ -130,8 +257,59 @@ export default function DashboardPage() {
         <p className="text-[14px] text-[#777777] mt-1">Control your milk collections, income and farmer records.</p>
       </motion.div>
 
+      {/* Global Date Filter Bar */}
+      <motion.div
+        initial={{ opacity: 0, y: -8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.25, delay: 0.05 }}
+        className="flex flex-wrap items-center justify-between gap-4 p-4 bg-white border border-[#ECECEC] rounded-2xl shadow-sm"
+      >
+        <div className="flex flex-wrap gap-2">
+          {[
+            { id: 'today', label: 'Today' },
+            { id: 'yesterday', label: 'Yesterday' },
+            { id: 'week', label: 'Last 7 Days' },
+            { id: 'month', label: 'Last 30 Days' },
+            { id: 'fy', label: 'Financial Year' },
+            { id: 'all', label: 'All Time' },
+            { id: 'custom', label: 'Custom' },
+          ].map(opt => (
+            <button
+              key={opt.id}
+              onClick={() => setFilterType(opt.id as any)}
+              className="px-3.5 py-1.5 rounded-xl text-[13px] font-semibold transition-all cursor-pointer border"
+              style={{
+                background: filterType === opt.id ? '#FF6B00' : 'transparent',
+                color: filterType === opt.id ? '#FFFFFF' : '#666666',
+                borderColor: filterType === opt.id ? '#FF6B00' : '#ECECEC',
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
+        {filterType === 'custom' && (
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              value={customStart}
+              onChange={e => setCustomStart(e.target.value)}
+              className="px-3 py-1.5 border border-[#ECECEC] rounded-xl text-[13px] font-semibold text-[#444]"
+            />
+            <span className="text-[12px] text-[#777]">to</span>
+            <input
+              type="date"
+              value={customEnd}
+              onChange={e => setCustomEnd(e.target.value)}
+              className="px-3 py-1.5 border border-[#ECECEC] rounded-xl text-[13px] font-semibold text-[#444]"
+            />
+          </div>
+        )}
+      </motion.div>
+
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
         {summaryCards.map((card, i) => {
           const Icon = card.icon;
           return (

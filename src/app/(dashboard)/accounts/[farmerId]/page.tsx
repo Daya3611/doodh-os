@@ -6,6 +6,7 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { farmerService } from '@/services/farmerService';
 import { ledgerService } from '@/services/ledgerService';
 import { Farmer, LedgerEntry } from '@/types';
+import { calculateFarmerBalance } from '@/lib/balance';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
 import { ArrowLeft, Printer, FileDown, Plus } from 'lucide-react';
@@ -51,7 +52,7 @@ export default function FarmerLedgerPage({ params }: { params: Promise<{ farmerI
 
   const exportExcel = () => {
     if (!farmer) return;
-    const data = ledger.map(l => {
+    const data = displayLedger.map(l => {
       const d = (l.createdAt as any).toDate ? (l.createdAt as any).toDate() : new Date(l.createdAt as any);
       return {
         Date: format(d, 'dd/MM/yyyy hh:mm a'),
@@ -72,7 +73,13 @@ export default function FarmerLedgerPage({ params }: { params: Promise<{ farmerI
   if (isLoading) return <div className="p-10 text-center text-[#777]">Loading ledger...</div>;
   if (!farmer) return <div className="p-10 text-center text-red-500">Farmer not found</div>;
 
-  const balance = farmer.balance || 0;
+  const balanceResult = calculateFarmerBalance(ledger);
+  const balance = balanceResult.balance;
+  
+  const displayLedger = balanceResult.sortedTransactions.map((tx, idx) => ({
+    ...tx,
+    balance: balanceResult.runningBalances[idx]
+  })).reverse();
 
   return (
     <div className="space-y-5">
@@ -135,12 +142,12 @@ export default function FarmerLedgerPage({ params }: { params: Promise<{ farmerI
               </tr>
             </thead>
             <tbody className="divide-y divide-[#F0F0F0]">
-              {ledger.length === 0 ? (
+              {displayLedger.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="text-center py-10 text-[13px] text-[#777]">No transactions yet.</td>
                 </tr>
               ) : (
-                ledger.map(l => {
+                displayLedger.map(l => {
                   const d = (l.createdAt as any).toDate ? (l.createdAt as any).toDate() : new Date(l.createdAt as any);
                   const typeLabel = l.transactionType.replace('_', ' ');
                   return (

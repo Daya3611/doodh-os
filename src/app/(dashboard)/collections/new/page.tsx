@@ -152,6 +152,27 @@ export default function NewCollectionPage() {
     if (rate <= 0) { toast.error('No rate found for this FAT/SNF. Check Rate Chart.'); return; }
 
     setIsSubmitting(true);
+    
+    // Duplicate Entry Detection (works completely offline by querying loaded local recent collections)
+    const todayStr = new Date().toDateString();
+    const isDuplicate = recentCollections.some(c => {
+      if (!c.createdAt) return false;
+      const d = (c.createdAt as any).toDate
+        ? (c.createdAt as any).toDate()
+        : new Date(c.createdAt as any);
+      return c.farmerId.toLowerCase() === currentFarmer.id.toLowerCase() &&
+             c.shift === data.shift &&
+             d.toDateString() === todayStr;
+    });
+
+    if (isDuplicate) {
+      const confirmSave = window.confirm(`Duplicate Entry Detected:\nA collection for ${currentFarmer.name} in the ${data.shift} shift already exists today.\n\nDo you want to save this as a second entry?`);
+      if (!confirmSave) {
+        setIsSubmitting(false);
+        return;
+      }
+    }
+
     try {
       const colData = {
         farmerId: currentFarmer.id,

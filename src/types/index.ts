@@ -79,7 +79,7 @@ export interface Collection extends CollectionFormData {
 }
 
 // Ledger & Accounts
-export type TransactionType = 'milk_collection' | 'payment' | 'purchase' | 'advance' | 'adjustment';
+export type TransactionType = 'milk_collection' | 'payment' | 'purchase' | 'advance' | 'adjustment' | 'deduction' | 'credit_adjustment' | 'debit_adjustment';
 
 export interface LedgerEntry {
   id: string;
@@ -94,38 +94,7 @@ export interface LedgerEntry {
 }
 
 // Inventory & Purchases
-export const inventorySchema = z.object({
-  name: z.string().min(1, "Name is required"),
-  category: z.string().min(1, "Category is required"),
-  price: z.number().min(0, "Price must be positive"),
-  stock: z.number().min(0, "Stock cannot be negative"),
-  unit: z.string().min(1, "Unit is required"),
-});
-
-export type InventoryFormData = z.infer<typeof inventorySchema>;
-
-export interface InventoryItem extends InventoryFormData {
-  id: string;
-  createdAt: Timestamp | Date;
-}
-
-export interface PurchaseItem {
-  productId?: string;
-  name: string;
-  quantity: number;
-  price: number;
-  subtotal: number;
-}
-
-export interface Purchase {
-  id: string;
-  farmerId: string;
-  farmerName: string;
-  items: PurchaseItem[];
-  total: number;
-  createdAt: Timestamp | Date;
-  createdBy: string;
-}
+export * from './inventory';
 
 // Printer Settings
 export const printerSettingsSchema = z.object({

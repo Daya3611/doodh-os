@@ -1,68 +1,466 @@
 import { db } from '@/firebase/config';
 import {
-  collection, doc, getDocs, query, where,
-  serverTimestamp, orderBy, runTransaction,
+  collection, doc, getDocs, setDoc, deleteDoc, query,
+  serverTimestamp, orderBy, getDoc, Timestamp
 } from 'firebase/firestore';
-import { Purchase, PurchaseItem } from '@/types';
+import { PurchaseEntry, PurchaseEntryItem } from '@/types';
+import { offlineDb } from '@/lib/offlineDb';
+import { recalculateAndSyncFarmerBalance } from '@/lib/balance';
+import { toSafeNumber } from '@/utils/format';
+
+/** Normalizes all numeric fields on a purchase entry and its items so .toFixed() never crashes. */
+function normalizePurchaseEntry(p: PurchaseEntry): PurchaseEntry {
+  return {
+    ...p,
+    total: toSafeNumber(p.total),
+    gstTotal: toSafeNumber(p.gstTotal),
+    discount: toSafeNumber(p.discount),
+    transport: toSafeNumber(p.transport),
+    grandTotal: toSafeNumber(p.grandTotal),
+    paidAmount: toSafeNumber(p.paidAmount),
+    items: (p.items || []).map((item): PurchaseEntryItem => ({
+      ...item,
+      quantity: toSafeNumber(item.quantity),
+      purchaseRate: toSafeNumber(item.purchaseRate),
+      gstPercent: toSafeNumber(item.gstPercent),
+      gstAmount: toSafeNumber(item.gstAmount),
+      discount: toSafeNumber(item.discount),
+      total: toSafeNumber(item.total),
+    })),
+  };
+}
 
 export const purchaseService = {
   getCollectionRef: (centerId: string) =>
-    collection(db, 'centers', centerId, 'purchases'),
+    collection(db, 'centers', centerId, 'purchase_entries'),
 
-  getAll: async (centerId: string): Promise<Purchase[]> => {
-    const q = query(
-      purchaseService.getCollectionRef(centerId),
-      orderBy('createdAt', 'desc')
-    );
-    const snap = await getDocs(q);
-    return snap.docs.map(d => ({ id: d.id, ...d.data() } as Purchase));
+  getItemCollectionRef: (centerId: string) =>
+    collection(db, 'centers', centerId, 'purchase_items'),
+
+  getAll: async (centerId: string): Promise<PurchaseEntry[]> => {
+    if (typeof window !== 'undefined' && navigator.onLine) {
+      try {
+        const snap = await getDocs(query(purchaseService.getCollectionRef(centerId), orderBy('createdAt', 'desc')));
+        const cloudPurchases = snap.docs.map(d => ({ id: d.id, ...d.data() } as PurchaseEntry));
+
+        // Cache in background
+        const syncTime = Date.now();
+        for (const p of cloudPurchases) {
+          await offlineDb.purchaseEntries.put({
+            ...p,
+            date: (p.date as any).toDate ? (p.date as any).toDate() : new Date(p.date as any),
+            createdAt: (p.createdAt as any).toDate ? (p.createdAt as any).toDate() : new Date(p.createdAt as any),
+            centerId,
+            pendingSync: 0,
+            isDeleted: 0,
+            localUpdatedAt: syncTime
+          });
+        }
+        return cloudPurchases.map(normalizePurchaseEntry);
+      } catch (err) {
+        console.warn("Failed to fetch purchases online, using local cache:", err);
+      }
+    }
+
+    const local = await offlineDb.purchaseEntries
+      .where('centerId').equals(centerId)
+      .and(p => p.isDeleted !== 1)
+      .toArray();
+    return local
+      .map(normalizePurchaseEntry)
+      .sort((a, b) => new Date(b.createdAt as any).getTime() - new Date(a.createdAt as any).getTime());
   },
 
   add: async (
     centerId: string,
-    farmerId: string,
-    farmerName: string,
-    items: PurchaseItem[],
-    total: number,
+    data: Omit<PurchaseEntry, 'id' | 'purchaseNumber' | 'createdAt' | 'createdBy'>,
     createdBy: string
   ): Promise<string> => {
-    return await runTransaction(db, async (tx) => {
-      // 1. Get the farmer to update balance
-      const farmerRef = doc(db, 'centers', centerId, 'farmers', farmerId);
-      const farmerDoc = await tx.get(farmerRef);
-      if (!farmerDoc.exists()) throw new Error('Farmer not found');
-      
-      const currentBalance = farmerDoc.data().balance || 0;
-      const newBalance = currentBalance - total;
+    const isOnline = typeof window !== 'undefined' && navigator.onLine;
+    const purchaseId = `pur-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const purchaseNumber = `PUR-${Date.now().toString().slice(-6)}${Math.floor(100 + Math.random() * 900)}`;
 
-      // 2. Create the purchase document
-      const purchaseRef = doc(purchaseService.getCollectionRef(centerId));
-      tx.set(purchaseRef, {
-        farmerId,
-        farmerName,
-        items,
-        total,
+    // Prepare purchase document data
+    const purchaseEntryData: PurchaseEntry = {
+      ...data,
+      id: purchaseId,
+      purchaseNumber,
+      createdBy,
+      date: new Date(data.date as any),
+      createdAt: new Date(),
+    };
+
+    // Accumulate base item stocks (since multiple items can be in the same bill)
+    const itemStocks: Record<string, number> = {};
+    for (const item of data.items) {
+      if (itemStocks[item.itemId] === undefined) {
+        const localItem = await offlineDb.inventoryItems.get(item.itemId);
+        itemStocks[item.itemId] = localItem?.currentStock || 0;
+      }
+      const localVariant = await offlineDb.inventoryVariants.get(item.variantId);
+      const conversionQty = localVariant?.conversionQty || 1;
+      const convertedQty = item.quantity * conversionQty;
+      itemStocks[item.itemId] += convertedQty;
+    }
+
+    const stockUpdates: Array<{itemId: string, variantId: string, newVariantStock: number, newItemStock: number}> = [];
+    const auditLogs: any[] = [];
+
+    for (const item of data.items) {
+      const localVariant = await offlineDb.inventoryVariants.get(item.variantId);
+      const localItem = await offlineDb.inventoryItems.get(item.itemId);
+
+      const prevVariantStock = localVariant?.currentStock || 0;
+      const prevItemStock = localItem?.currentStock || 0;
+
+      const conversionQty = localVariant?.conversionQty || 1;
+      const convertedQty = item.quantity * conversionQty;
+
+      const finalItemStock = itemStocks[item.itemId];
+      const newVariantStock = finalItemStock / conversionQty;
+
+      // Update all variants belonging to the parent item to their equivalent stock
+      const allVariants = await offlineDb.inventoryVariants.where('itemId').equals(item.itemId).toArray();
+      for (const v of allVariants) {
+        const vConversion = v.conversionQty || 1;
+        const vNewStock = finalItemStock / vConversion;
+
+        const dupIdx = stockUpdates.findIndex(su => su.variantId === v.id);
+        if (dupIdx > -1) {
+          stockUpdates[dupIdx].newVariantStock = vNewStock;
+          stockUpdates[dupIdx].newItemStock = finalItemStock;
+        } else {
+          stockUpdates.push({
+            itemId: item.itemId,
+            variantId: v.id,
+            newVariantStock: vNewStock,
+            newItemStock: finalItemStock
+          });
+        }
+      }
+
+      auditLogs.push({
+        id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        itemId: item.itemId,
+        itemName: item.itemName,
+        variantId: item.variantId,
+        variantName: item.variantName,
+        prevStock: prevVariantStock,
+        newStock: newVariantStock,
+        quantity: item.quantity,
+        actionType: 'purchase',
+        referenceId: purchaseId,
+        reason: `Purchase Entry ${purchaseNumber} (${item.quantity} ${item.variantName} = ${convertedQty} ${localItem?.unit || 'KG'})`,
         createdBy,
-        createdAt: serverTimestamp(),
+        createdAt: new Date(),
+        centerId
       });
+    }
 
-      // 5. Create the ledger entry
-      const ledgerRef = doc(collection(db, 'centers', centerId, 'ledger'));
-      tx.set(ledgerRef, {
-        farmerId,
-        transactionType: 'purchase',
-        description: `Purchased ${items.length} items`,
-        credit: 0,
-        debit: total,
-        balance: newBalance,
-        referenceId: purchaseRef.id,
-        createdAt: serverTimestamp(),
-      });
+    // Determine outstanding amount to add to supplier
+    // Outstanding amount is what is NOT paid immediately
+    const outstanding = data.grandTotal - (data.paidAmount || 0);
 
-      // 6. Update farmer balance
-      tx.update(farmerRef, { balance: newBalance });
+    let supplierUpdate: { supplierId: string, newPending: number } | null = null;
+    if (outstanding > 0 && data.paymentMode === 'outstanding') {
+      const supplier = await offlineDb.suppliers.get(data.supplierId);
+      if (supplier) {
+        supplierUpdate = {
+          supplierId: data.supplierId,
+          newPending: (supplier.pendingAmount || 0) + outstanding
+        };
+      }
+    }
 
-      return purchaseRef.id;
+    // Farmer ledger integration (if we purchased from a farmer on ledger credit)
+    let farmerUpdate: { farmerId: string, newBalance: number } | null = null;
+    let ledgerEntry: any = null;
+
+    if (data.paymentMode === 'farmer_ledger') {
+      // In this case, supplierId is actually the farmerId
+      const farmer = await offlineDb.farmers.get(data.supplierId);
+      if (farmer) {
+        const prevBalance = farmer.balance || 0;
+        const newBalance = prevBalance + data.grandTotal; // Credit increases balance (we owe the farmer for milk/materials)
+        
+        farmerUpdate = {
+          farmerId: data.supplierId,
+          newBalance
+        };
+
+        const ledgerId = `led-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        ledgerEntry = {
+          id: ledgerId,
+          farmerId: data.supplierId,
+          transactionType: 'milk_collection', // Treat as collection credit
+          description: `Inventory Sale credit - Purchase #${purchaseNumber}`,
+          credit: data.grandTotal,
+          debit: 0,
+          balance: newBalance,
+          referenceId: purchaseId,
+          createdAt: new Date(),
+          centerId
+        };
+      }
+    }
+
+    if (isOnline) {
+      try {
+        // Write purchase entry
+        const entryRef = doc(purchaseService.getCollectionRef(centerId), purchaseId);
+        await setDoc(entryRef, {
+          ...purchaseEntryData,
+          date: Timestamp.fromDate(purchaseEntryData.date as Date),
+          createdAt: serverTimestamp()
+        });
+
+        // Write purchase items
+        for (const item of data.items) {
+          const itemRef = doc(purchaseService.getItemCollectionRef(centerId));
+          await setDoc(itemRef, {
+            ...item,
+            purchaseEntryId: purchaseId,
+            createdAt: serverTimestamp()
+          });
+        }
+
+        // Update Stock levels in Firestore
+        for (const update of stockUpdates) {
+          const itemDocRef = doc(db, 'centers', centerId, 'inventory_items', update.itemId);
+          await setDoc(itemDocRef, { currentStock: update.newItemStock, stock: update.newItemStock }, { merge: true });
+
+          const varDocRef = doc(db, 'centers', centerId, 'inventory_variants', update.variantId);
+          await setDoc(varDocRef, { currentStock: update.newVariantStock }, { merge: true });
+        }
+
+        // Write Audit Logs in Firestore
+        for (const log of auditLogs) {
+          const logRef = doc(db, 'centers', centerId, 'inventory_logs', log.id);
+          const { centerId: _, pendingSync: __, ...logUpload } = log;
+          await setDoc(logRef, {
+            ...logUpload,
+            createdAt: serverTimestamp()
+          });
+        }
+
+        // Write Supplier pending outstanding in Firestore
+        if (supplierUpdate) {
+          const supRef = doc(db, 'centers', centerId, 'suppliers', supplierUpdate.supplierId);
+          await setDoc(supRef, { pendingAmount: supplierUpdate.newPending }, { merge: true });
+        }
+
+        // Write Farmer ledger if farmer_ledger
+        if (farmerUpdate && ledgerEntry) {
+          const farmerDocRef = doc(db, 'centers', centerId, 'farmers', farmerUpdate.farmerId);
+          await setDoc(farmerDocRef, { balance: farmerUpdate.newBalance }, { merge: true });
+
+          const ledRef = doc(db, 'centers', centerId, 'ledger', ledgerEntry.id);
+          const { centerId: _, pendingSync: __, ...ledUpload } = ledgerEntry;
+          await setDoc(ledRef, {
+            ...ledUpload,
+            createdAt: serverTimestamp()
+          });
+
+          await recalculateAndSyncFarmerBalance(centerId, farmerUpdate.farmerId);
+        }
+
+        // Cache locally in Dexie
+        await offlineDb.purchaseEntries.put({
+          ...purchaseEntryData,
+          centerId,
+          createdAt: new Date(),
+          pendingSync: 0,
+          isDeleted: 0,
+          localUpdatedAt: Date.now()
+        });
+
+        for (const item of data.items) {
+          await offlineDb.purchaseItems.put({
+            id: `pi-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            ...item,
+            purchaseEntryId: purchaseId,
+            centerId,
+            localUpdatedAt: Date.now()
+          });
+        }
+
+        for (const update of stockUpdates) {
+          await offlineDb.inventoryVariants.update(update.variantId, { currentStock: update.newVariantStock });
+          await offlineDb.inventoryItems.update(update.itemId, { currentStock: update.newItemStock, stock: update.newItemStock });
+        }
+
+        for (const log of auditLogs) {
+          await offlineDb.inventoryLogs.put({
+            ...log,
+            pendingSync: 0,
+            localUpdatedAt: Date.now()
+          });
+        }
+
+        if (supplierUpdate) {
+          const s = await offlineDb.suppliers.get(supplierUpdate.supplierId);
+          if (s) {
+            await offlineDb.suppliers.put({
+              ...s,
+              pendingAmount: supplierUpdate.newPending,
+              localUpdatedAt: Date.now()
+            });
+          }
+        }
+
+        if (farmerUpdate && ledgerEntry) {
+          await offlineDb.farmers.update(farmerUpdate.farmerId, { balance: farmerUpdate.newBalance });
+          await offlineDb.ledger.put({
+            ...ledgerEntry,
+            pendingSync: 0,
+            isDeleted: 0,
+            localUpdatedAt: Date.now()
+          });
+        }
+
+        return purchaseId;
+      } catch (err) {
+        console.warn("Failed to complete purchase online, falling back to offline write:", err);
+      }
+    }
+
+    // Offline Save
+    await offlineDb.purchaseEntries.put({
+      ...purchaseEntryData,
+      centerId,
+      createdAt: new Date(),
+      pendingSync: 1,
+      isDeleted: 0,
+      localUpdatedAt: Date.now()
     });
+
+    for (const item of data.items) {
+      await offlineDb.purchaseItems.put({
+        id: `pi-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        ...item,
+        purchaseEntryId: purchaseId,
+        centerId,
+        localUpdatedAt: Date.now()
+      });
+    }
+
+    for (const update of stockUpdates) {
+      await offlineDb.inventoryVariants.update(update.variantId, { currentStock: update.newVariantStock });
+      await offlineDb.inventoryItems.update(update.itemId, { currentStock: update.newItemStock, stock: update.newItemStock });
+    }
+
+    for (const log of auditLogs) {
+      await offlineDb.inventoryLogs.put({
+        ...log,
+        pendingSync: 1,
+        localUpdatedAt: Date.now()
+      });
+    }
+
+    if (supplierUpdate) {
+      const s = await offlineDb.suppliers.get(supplierUpdate.supplierId);
+      if (s) {
+        await offlineDb.suppliers.put({
+          ...s,
+          pendingAmount: supplierUpdate.newPending,
+          pendingSync: 1,
+          localUpdatedAt: Date.now()
+        });
+      }
+    }
+
+    if (farmerUpdate && ledgerEntry) {
+      await offlineDb.farmers.update(farmerUpdate.farmerId, { balance: farmerUpdate.newBalance });
+      await offlineDb.ledger.put({
+        ...ledgerEntry,
+        pendingSync: 1,
+        isDeleted: 0,
+        localUpdatedAt: Date.now()
+      });
+    }
+
+    return purchaseId;
   },
+
+  getItemsByPurchase: async (centerId: string, purchaseId: string): Promise<PurchaseEntryItem[]> => {
+    const localItems = await offlineDb.purchaseItems
+      .where('purchaseEntryId').equals(purchaseId)
+      .and(pi => pi.centerId === centerId)
+      .toArray();
+
+    return localItems;
+  },
+
+  delete: async (centerId: string, id: string): Promise<void> => {
+    // Soft delete locally and let sync engine handle it
+    const local = await offlineDb.purchaseEntries.get(id);
+    if (local) {
+      // 1. Revert stock changes
+      const pItems = await purchaseService.getItemsByPurchase(centerId, id);
+      for (const item of pItems) {
+        const localVariant = await offlineDb.inventoryVariants.get(item.variantId);
+        const localItem = await offlineDb.inventoryItems.get(item.itemId);
+        
+        if (localVariant && localItem) {
+          const conversionQty = localVariant.conversionQty || 1;
+          const convertedQty = item.quantity * conversionQty;
+          const newParentStock = (localItem.currentStock || 0) - convertedQty;
+
+          // Update parent item stock and mark it for sync
+          await offlineDb.inventoryItems.put({
+            ...localItem,
+            currentStock: newParentStock,
+            stock: newParentStock, // Legacy compatibility
+            pendingSync: 1,
+            localUpdatedAt: Date.now()
+          });
+
+          // Recalculate equivalent stock for all variants of this item
+          const allVariants = await offlineDb.inventoryVariants.where('itemId').equals(item.itemId).toArray();
+          for (const v of allVariants) {
+            const vConversion = v.conversionQty || 1;
+            const vNewStock = newParentStock / vConversion;
+            await offlineDb.inventoryVariants.put({
+              ...v,
+              currentStock: vNewStock,
+              localUpdatedAt: Date.now()
+            });
+          }
+        }
+      }
+
+      // 2. Revert Supplier Outstanding balance if applicable
+      const outstanding = local.grandTotal - (local.paidAmount || 0);
+      if (outstanding > 0 && local.paymentMode === 'outstanding') {
+        const supplier = await offlineDb.suppliers.get(local.supplierId);
+        if (supplier) {
+          await offlineDb.suppliers.update(local.supplierId, {
+            pendingAmount: (supplier.pendingAmount || 0) - outstanding
+          });
+        }
+      }
+
+      // 3. Revert Farmer balance & ledger if applicable
+      if (local.paymentMode === 'farmer_ledger') {
+        const farmer = await offlineDb.farmers.get(local.supplierId);
+        if (farmer) {
+          const newBal = (farmer.balance || 0) - local.grandTotal;
+          await offlineDb.farmers.update(local.supplierId, { balance: newBal });
+          // delete ledger entries for this referenceId
+          const ledgerEntries = await offlineDb.ledger.where('referenceId').equals(id).toArray();
+          for (const le of ledgerEntries) {
+            await offlineDb.ledger.update(le.id, { isDeleted: 1, pendingSync: 1 });
+          }
+        }
+      }
+
+      // 4. Mark purchase deleted
+      await offlineDb.purchaseEntries.put({
+        ...local,
+        isDeleted: 1,
+        pendingSync: 1,
+        localUpdatedAt: Date.now()
+      });
+    }
+  }
 };

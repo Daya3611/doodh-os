@@ -10,6 +10,7 @@ import { purchaseService } from '@/services/purchaseService';
 import { inventoryService } from '@/services/inventoryService';
 import { Payment } from '@/services/paymentService';
 import { Collection, Farmer, LedgerEntry, Purchase, InventoryItem } from '@/types';
+import { calculateFarmerBalance } from '@/lib/balance';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
 import { FileDown, Download, FileText, Milk, Users, Wallet, Droplets, Book, Box, Package } from 'lucide-react';
@@ -77,7 +78,7 @@ export default function ReportsPage() {
       setFarmers(farData);
       setPayments(pmtData);
       setLedgers(ldgData);
-      setPurchases(purData);
+      setPurchases(purData as any);
       setInventory(invData);
     } catch {
       toast.error('Failed to load report data');
@@ -117,6 +118,23 @@ export default function ReportsPage() {
     if (selectedFarmer === 'all') return true;
     return farmerId === selectedFarmer;
   };
+
+  // Group ledger entries by farmer ID
+  const ledgerMap = new Map<string, LedgerEntry[]>();
+  ledgers.forEach(l => {
+    if (!ledgerMap.has(l.farmerId)) {
+      ledgerMap.set(l.farmerId, []);
+    }
+    ledgerMap.get(l.farmerId)!.push(l);
+  });
+
+  // Calculate correct balance for each farmer using calculateFarmerBalance
+  const farmerBalances = new Map<string, number>();
+  farmers.forEach(f => {
+    const transactions = ledgerMap.get(f.id) || [];
+    const { balance } = calculateFarmerBalance(transactions);
+    farmerBalances.set(f.id, balance);
+  });
 
   // Render content based on tab
   const renderContent = () => {
@@ -191,24 +209,27 @@ export default function ReportsPage() {
 
     if (activeTab === 'outstanding') {
       // Outstanding = Negative Balances (Receivables) + Positive Balances (Payables)
-      const payables = farmers.filter(f => (f.balance || 0) > 0);
-      const receivables = farmers.filter(f => (f.balance || 0) < 0);
+      const payables = farmers.filter(f => (farmerBalances.get(f.id) || 0) > 0);
+      const receivables = farmers.filter(f => (farmerBalances.get(f.id) || 0) < 0);
 
-      const doExport = () => exportToExcel(farmers.map(f => ({
-        FarmerID: f.id,
-        Name: f.name,
-        Village: f.village,
-        Status: f.active ? 'Active' : 'Inactive',
-        Balance: f.balance || 0,
-        Type: (f.balance || 0) > 0 ? 'Payable (Owe to Farmer)' : ((f.balance || 0) < 0 ? 'Receivable (Owed by Farmer)' : 'Settled')
-      })), 'Outstanding_Balance_Report');
+      const doExport = () => exportToExcel(farmers.map(f => {
+        const balance = farmerBalances.get(f.id) || 0;
+        return {
+          FarmerID: f.id,
+          Name: f.name,
+          Village: f.village,
+          Status: f.active ? 'Active' : 'Inactive',
+          Balance: balance,
+          Type: balance > 0 ? 'Payable (Owe to Farmer)' : (balance < 0 ? 'Receivable (Owed by Farmer)' : 'Settled')
+        };
+      }), 'Outstanding_Balance_Report');
 
       return (
         <div className="space-y-4">
           <div className="flex justify-between items-center bg-[#F7F7F7] p-4 rounded-xl border border-[#ECECEC]">
             <div className="flex gap-6">
-              <div><div className="text-[10px] text-[#777] uppercase tracking-wider mb-1">Total Payables</div><div className="text-[18px] font-bold text-green-600">₹{payables.reduce((s, f) => s + (f.balance || 0), 0).toFixed(2)}</div></div>
-              <div><div className="text-[10px] text-[#777] uppercase tracking-wider mb-1">Total Receivables</div><div className="text-[18px] font-bold text-red-600">₹{receivables.reduce((s, f) => s + Math.abs(f.balance || 0), 0).toFixed(2)}</div></div>
+              <div><div className="text-[10px] text-[#777] uppercase tracking-wider mb-1">Total Payables</div><div className="text-[18px] font-bold text-green-600">₹{payables.reduce((s, f) => s + (farmerBalances.get(f.id) || 0), 0).toFixed(2)}</div></div>
+              <div><div className="text-[10px] text-[#777] uppercase tracking-wider mb-1">Total Receivables</div><div className="text-[18px] font-bold text-red-600">₹{receivables.reduce((s, f) => s + Math.abs(farmerBalances.get(f.id) || 0), 0).toFixed(2)}</div></div>
             </div>
             <button onClick={doExport} className="flex items-center gap-2 px-4 py-2 bg-[#111] text-white text-[12px] font-bold rounded-lg hover:bg-gray-800"><FileDown size={14} /> Export Excel</button>
           </div>
@@ -225,27 +246,30 @@ export default function ReportsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {farmers.filter(f => f.balance !== 0).map(f => (
-                  <TableRow key={f.id}>
-                    <TableCell className="text-[12px] text-[#777]">{f.id}</TableCell>
-                    <TableCell className="text-[12px] font-medium">{f.name}</TableCell>
-                    <TableCell className="text-[12px]">{f.village}</TableCell>
-                    <TableCell className="text-[12px]">
-                      <span className={`px-2 py-1 rounded-md text-[10px] font-bold ${f.active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                        {f.active ? 'Active' : 'Inactive'}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-[12px]">
-                      <span className={`px-2 py-1 rounded-md text-[10px] font-bold ${(f.balance || 0) > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                        {(f.balance || 0) > 0 ? 'Payable' : 'Receivable'}
-                      </span>
-                    </TableCell>
-                    <TableCell className={`text-[12px] text-right font-bold ${(f.balance || 0) > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      ₹{Math.abs(f.balance || 0).toFixed(2)}
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {farmers.filter(f => f.balance !== 0).length === 0 && (
+                {farmers.filter(f => (farmerBalances.get(f.id) || 0) !== 0).map(f => {
+                  const balance = farmerBalances.get(f.id) || 0;
+                  return (
+                    <TableRow key={f.id}>
+                      <TableCell className="text-[12px] text-[#777]">{f.id}</TableCell>
+                      <TableCell className="text-[12px] font-medium">{f.name}</TableCell>
+                      <TableCell className="text-[12px]">{f.village}</TableCell>
+                      <TableCell className="text-[12px]">
+                        <span className={`px-2 py-1 rounded-md text-[10px] font-bold ${f.active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                          {f.active ? 'Active' : 'Inactive'}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-[12px]">
+                        <span className={`px-2 py-1 rounded-md text-[10px] font-bold ${balance > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                          {balance > 0 ? 'Payable' : 'Receivable'}
+                        </span>
+                      </TableCell>
+                      <TableCell className={`text-[12px] text-right font-bold ${balance > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        ₹{Math.abs(balance).toFixed(2)}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+                {farmers.filter(f => (farmerBalances.get(f.id) || 0) !== 0).length === 0 && (
                   <TableRow>
                     <TableCell colSpan={6} className="text-center py-8 text-[#777]">No outstanding balances found.</TableCell>
                   </TableRow>
@@ -326,7 +350,17 @@ export default function ReportsPage() {
     }
 
     if (activeTab === 'farmer') {
-      const doExport = () => exportToExcel(farmers, 'Farmer_Report');
+      const doExport = () => exportToExcel(farmers.map(f => {
+        const balance = farmerBalances.get(f.id) || 0;
+        return {
+          FarmerID: f.id,
+          Name: f.name,
+          Village: f.village,
+          AnimalType: f.animalType,
+          Status: f.active ? 'Active' : 'Inactive',
+          Balance: balance
+        };
+      }), 'Farmer_Report');
       return (
         <div className="space-y-4">
           <div className="flex justify-between items-center bg-[#F7F7F7] p-4 rounded-xl border border-[#ECECEC]">
@@ -349,22 +383,25 @@ export default function ReportsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {farmers.map(f => (
-                  <TableRow key={f.id}>
-                    <TableCell className="text-[12px] text-[#777]">{f.id}</TableCell>
-                    <TableCell className="text-[12px] font-medium">{f.name}</TableCell>
-                    <TableCell className="text-[12px]">{f.village}</TableCell>
-                    <TableCell className="text-[12px] capitalize">{f.animalType}</TableCell>
-                    <TableCell className="text-[12px]">
-                      <span className={`px-2 py-1 rounded-md text-[10px] font-bold ${f.active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                        {f.active ? 'Active' : 'Inactive'}
-                      </span>
-                    </TableCell>
-                    <TableCell className={`text-[12px] text-right font-bold ${(f.balance || 0) > 0 ? 'text-green-600' : (f.balance || 0) < 0 ? 'text-red-600' : 'text-[#777]'}`}>
-                      ₹{Math.abs(f.balance || 0).toFixed(2)}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {farmers.map(f => {
+                  const balance = farmerBalances.get(f.id) || 0;
+                  return (
+                    <TableRow key={f.id}>
+                      <TableCell className="text-[12px] text-[#777]">{f.id}</TableCell>
+                      <TableCell className="text-[12px] font-medium">{f.name}</TableCell>
+                      <TableCell className="text-[12px]">{f.village}</TableCell>
+                      <TableCell className="text-[12px] capitalize">{f.animalType}</TableCell>
+                      <TableCell className="text-[12px]">
+                        <span className={`px-2 py-1 rounded-md text-[10px] font-bold ${f.active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                          {f.active ? 'Active' : 'Inactive'}
+                        </span>
+                      </TableCell>
+                      <TableCell className={`text-[12px] text-right font-bold ${balance > 0 ? 'text-green-600' : balance < 0 ? 'text-red-600' : 'text-[#777]'}`}>
+                        ₹{Math.abs(balance).toFixed(2)}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
                 {farmers.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={6} className="text-center py-8 text-[#777]">No farmers found.</TableCell>
@@ -449,7 +486,7 @@ export default function ReportsPage() {
                   <TableRow key={p.id}>
                     <TableCell className="text-[12px]">{format((p.createdAt as any).toDate ? (p.createdAt as any).toDate() : new Date(p.createdAt as any), 'dd/MM/yyyy HH:mm')}</TableCell>
                     <TableCell className="text-[12px] font-medium">{p.farmerName} ({p.farmerId})</TableCell>
-                    <TableCell className="text-[12px]">{p.items.map((i: any) => i.itemName).join(', ')}</TableCell>
+                    <TableCell className="text-[12px]">{p.items.map((i: any) => i.name || i.itemName).join(', ')}</TableCell>
                     <TableCell className="text-[12px] text-right font-bold text-[#FF6B00]">₹{p.total.toFixed(2)}</TableCell>
                   </TableRow>
                 ))}
