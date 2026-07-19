@@ -1,14 +1,20 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/useAuthStore';
 import { collectionService } from '@/services/collectionService';
-import { Collection } from '@/types';
+import { farmerService } from '@/services/farmerService';
+import { printerService } from '@/services/printerService';
+import { settingsService, GeneralSettings } from '@/services/settingsService';
+import { Collection, Farmer, PrinterSettingsFormData } from '@/types';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, Search, MoreHorizontal, Trash, Printer, Milk, Download, Filter, ChevronDown } from 'lucide-react';
 import { format, isToday, isYesterday, parseISO, startOfDay, endOfDay } from 'date-fns';
+import { useReactToPrint } from 'react-to-print';
+import { ThermalReceipt } from '@/components/receipt/ThermalReceipt';
+import { A4Receipt } from '@/components/receipt/A4Receipt';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
@@ -25,11 +31,28 @@ export default function CollectionsPage() {
   const centerId = profile?.centerId;
 
   const [collections, setCollections] = useState<Collection[]>([]);
+  const [farmers, setFarmers] = useState<Farmer[]>([]);
+  const [printerSettings, setPrinterSettings] = useState<PrinterSettingsFormData | null>(null);
+  const [generalSettings, setGeneralSettings] = useState<Partial<GeneralSettings>>({});
+  const [printCollection, setPrintCollection] = useState<Collection | null>(null);
+  
   const [searchTerm, setSearchTerm] = useState('');
   const [shiftFilter, setShiftFilter] = useState<'all' | 'morning' | 'evening'>('all');
   const [animalFilter, setAnimalFilter] = useState<'all' | 'cow' | 'buffalo'>('all');
   const [dateFilter, setDateFilter] = useState('');   // YYYY-MM-DD string
   const [isLoading, setIsLoading] = useState(true);
+
+  const receiptRef = useRef<HTMLDivElement>(null);
+  const handlePrint = useReactToPrint({
+    contentRef: receiptRef,
+  });
+
+  const handlePrintSpecificCollection = (c: Collection) => {
+    setPrintCollection(c);
+    setTimeout(() => {
+      handlePrint();
+    }, 100);
+  };
 
   const load = async () => {
     if (!centerId) return;
@@ -41,7 +64,18 @@ export default function CollectionsPage() {
     finally { setIsLoading(false); }
   };
 
-  useEffect(() => { load(); }, [centerId]);
+  useEffect(() => {
+    load();
+    if (centerId) {
+      farmerService.getAll(centerId).then(setFarmers);
+      printerService.getSettings(centerId).then(data => {
+        setPrinterSettings(data || printerService.getDefaultSettings());
+      });
+      settingsService.getSettings(centerId).then(data => {
+        setGeneralSettings(data || {});
+      });
+    }
+  }, [centerId]);
 
   const handleDelete = async (id: string) => {
     if (!centerId || !confirm('Delete this collection?')) return;
@@ -87,21 +121,30 @@ export default function CollectionsPage() {
             style={{ cursor: 'pointer' }}
           />
           {/* Shift filter */}
-          <div className="flex rounded-xl overflow-hidden border border-[#ECECEC]" style={{ background: '#F7F7F7' }}>
+          {/* Shift filter */}
+          <div className="flex rounded-xl p-0.5 border border-[#ECECEC]" style={{ background: '#F7F7F7' }}>
             {(['all', 'morning', 'evening'] as const).map(t => (
               <button key={t} onClick={() => setShiftFilter(t)}
-                className="px-3 py-2 text-[12px] font-semibold capitalize transition-all"
-                style={{ background: shiftFilter === t ? '#FF6B00' : 'transparent', color: shiftFilter === t ? '#FFF' : '#777', borderRadius: '10px' }}>
+                className={`px-3.5 py-1.5 text-[12px] font-semibold capitalize transition-all rounded-[10px] ${
+                  shiftFilter === t
+                    ? 'text-white shadow-sm'
+                    : 'text-[#777] hover:bg-white hover:text-[#FF6B00] hover:shadow-sm'
+                }`}
+                style={{ background: shiftFilter === t ? '#FF6B00' : 'transparent' }}>
                 {t === 'all' ? 'All Shifts' : t}
               </button>
             ))}
           </div>
           {/* Animal filter */}
-          <div className="flex rounded-xl overflow-hidden border border-[#ECECEC]" style={{ background: '#F7F7F7' }}>
+          <div className="flex rounded-xl p-0.5 border border-[#ECECEC]" style={{ background: '#F7F7F7' }}>
             {(['all', 'cow', 'buffalo'] as const).map(t => (
               <button key={t} onClick={() => setAnimalFilter(t)}
-                className="px-3 py-2 text-[12px] font-semibold capitalize transition-all"
-                style={{ background: animalFilter === t ? '#FF6B00' : 'transparent', color: animalFilter === t ? '#FFF' : '#777', borderRadius: '10px' }}>
+                className={`px-3.5 py-1.5 text-[12px] font-semibold capitalize transition-all rounded-[10px] ${
+                  animalFilter === t
+                    ? 'text-white shadow-sm'
+                    : 'text-[#777] hover:bg-white hover:text-[#FF6B00] hover:shadow-sm'
+                }`}
+                style={{ background: animalFilter === t ? '#FF6B00' : 'transparent' }}>
                 {t === 'all' ? 'All' : t}
               </button>
             ))}
@@ -240,15 +283,16 @@ export default function CollectionsPage() {
                         </td>
                         <td className="px-6 py-4">
                           <DropdownMenu>
-                            <DropdownMenuTrigger >
-                              <button className="w-8 h-8 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity outline-none" style={{ background: '#F0F0F0' }}>
-                                <MoreHorizontal size={14} style={{ color: '#555' }} />
-                              </button>
+                            <DropdownMenuTrigger
+                              className="w-8 h-8 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity outline-none"
+                              style={{ background: '#F0F0F0' }}
+                            >
+                              <MoreHorizontal size={14} style={{ color: '#555' }} />
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" className="w-44 rounded-xl">
                               <DropdownMenuLabel className="text-[11px] text-[#AAAAAA] uppercase tracking-wider">Actions</DropdownMenuLabel>
                               <DropdownMenuSeparator />
-                              <DropdownMenuItem className="text-[13px] gap-2 cursor-pointer">
+                              <DropdownMenuItem className="text-[13px] gap-2 cursor-pointer" onClick={() => handlePrintSpecificCollection(col)}>
                                 <Printer size={14} /> Print Receipt
                               </DropdownMenuItem>
                               <DropdownMenuItem className="text-[13px] gap-2 cursor-pointer text-red-600 focus:text-red-600 focus:bg-red-50" onClick={() => handleDelete(col.id)}>
@@ -272,6 +316,37 @@ export default function CollectionsPage() {
           </div>
         )}
       </motion.div>
+
+      {/* Hidden print container */}
+      <div style={{ position: 'absolute', top: '-9999px', left: '-9999px', visibility: 'hidden' }}>
+        {printCollection && printerSettings && (
+          <div ref={receiptRef}>
+            {Array.from({ length: printerSettings.copies || 1 }).map((_, i) => (
+              <div key={i} style={{ marginBottom: (printerSettings.printerType === 'a4' && i > 0) ? '20px' : '0', pageBreakBefore: (printerSettings.printerType === 'a4' && i > 0) ? 'always' : 'auto' }}>
+                {printerSettings.printerType === 'a4' ? (
+                  <A4Receipt
+                    collection={printCollection}
+                    farmer={farmers.find(f => f.id === printCollection.farmerId) || null}
+                    settings={printerSettings}
+                    centerName={generalSettings.centerName || `${profile?.name}'s Center`}
+                    centerVillage={generalSettings.address || ''}
+                    centerPhone={generalSettings.phone || ''}
+                  />
+                ) : (
+                  <ThermalReceipt
+                    collection={printCollection}
+                    farmer={farmers.find(f => f.id === printCollection.farmerId) || null}
+                    settings={printerSettings}
+                    centerName={generalSettings.centerName || `${profile?.name}'s Center`}
+                    centerVillage={generalSettings.address || ''}
+                    centerPhone={generalSettings.phone || ''}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
