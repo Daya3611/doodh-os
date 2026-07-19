@@ -51,6 +51,9 @@ export default function NewCollectionPage() {
   const [farmers, setFarmers] = useState<Farmer[]>([]);
   const [currentFarmer, setCurrentFarmer] = useState<Farmer | null>(null);
   const [rate, setRate] = useState(0);
+  const [matchedFat, setMatchedFat] = useState<number | null>(null);
+  const [matchedSnf, setMatchedSnf] = useState<number | null>(null);
+  const [isNearestApplied, setIsNearestApplied] = useState(false);
   const [recentCollections, setRecentCollections] = useState<Collection[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [savedCount, setSavedCount] = useState(0);
@@ -126,10 +129,16 @@ export default function NewCollectionPage() {
   useEffect(() => {
     const fetchRate = async () => {
       if (centerId && numFat > 0 && numSnf > 0) {
-        const r = await rateChartService.getRate(centerId, values.animalType, numFat, numSnf);
-        setRate(r || 0);
+        const res = await rateChartService.lookupRate(centerId, values.animalType, numFat, numSnf);
+        setRate(res.rate || 0);
+        setMatchedFat(res.matchedFat);
+        setMatchedSnf(res.matchedSnf);
+        setIsNearestApplied(res.isNearestApplied);
       } else {
         setRate(0);
+        setMatchedFat(null);
+        setMatchedSnf(null);
+        setIsNearestApplied(false);
       }
     };
     fetchRate();
@@ -184,6 +193,11 @@ export default function NewCollectionPage() {
         snf: numSnf,
         rate,
         totalAmount,
+        enteredFat: numFat,
+        enteredSnf: numSnf,
+        matchedFat: matchedFat ?? numFat,
+        matchedSnf: matchedSnf ?? numSnf,
+        isNearestRateApplied: isNearestApplied,
       };
       
       const newId = await collectionService.add(centerId, colData, profile.uid || 'unknown');
@@ -208,6 +222,9 @@ export default function NewCollectionPage() {
         shift: data.shift,
         liters: '', fat: '', snf: '',
       });
+      setMatchedFat(null);
+      setMatchedSnf(null);
+      setIsNearestApplied(false);
       setTimeout(() => refs.farmerId.current?.focus(), 50);
     } catch { toast.error('Failed to save collection'); }
     finally { setIsSubmitting(false); }
@@ -383,7 +400,10 @@ export default function NewCollectionPage() {
                   { label: 'Farmer', value: currentFarmer?.name || '—' },
                   { label: 'Animal', value: values.animalType || '—', cls: 'capitalize' },
                   { label: 'Liters', value: numLiters > 0 ? `${numLiters.toFixed(1)} L` : '—' },
-                  { label: 'FAT / SNF', value: numFat > 0 ? `${numFat.toFixed(1)} / ${numSnf.toFixed(1)}` : '—' },
+                  { label: 'Entered FAT / SNF', value: numFat > 0 ? `${numFat.toFixed(1)} / ${numSnf.toFixed(1)}` : '—' },
+                  ...(isNearestApplied ? [
+                    { label: 'Matched FAT / SNF', value: matchedFat && matchedSnf ? `${matchedFat.toFixed(1)} / ${matchedSnf.toFixed(1)}` : '—' }
+                  ] : []),
                   { label: 'Rate / L', value: rate > 0 ? `₹${rate.toFixed(2)}` : 'Not set' },
                 ].map(r => (
                   <div key={r.label} className="flex justify-between items-center">
@@ -394,8 +414,15 @@ export default function NewCollectionPage() {
               </div>
               <div className="border-t border-white/20 pt-4">
                 <div className="text-[11px] text-white/60 mb-1">Total Amount</div>
-                <div className="text-[42px] font-extrabold text-white leading-none">
-                  ₹{totalAmount.toFixed(2)}
+                <div className="flex justify-between items-end">
+                  <div className="text-[42px] font-extrabold text-white leading-none">
+                    ₹{totalAmount.toFixed(2)}
+                  </div>
+                  {isNearestApplied && (
+                    <div className="bg-white/20 text-white text-[10px] font-bold px-2.5 py-1 rounded-full border border-white/30 tracking-wide uppercase animate-pulse">
+                      Nearest Rate Applied
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

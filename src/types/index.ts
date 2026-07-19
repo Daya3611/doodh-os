@@ -68,11 +68,50 @@ export const collectionSchema = z.object({
   clr: z.number().optional(),
   rate: z.number().min(0),
   totalAmount: z.number().min(0),
+  enteredFat: z.number().optional(),
+  enteredSnf: z.number().optional(),
+  matchedFat: z.number().optional(),
+  matchedSnf: z.number().optional(),
+  isNearestRateApplied: z.boolean().optional(),
+  paymentId: z.string().nullable().optional(),
+  paymentStatus: z.enum(['pending', 'paid']).optional(),
 });
 
 export type CollectionFormData = z.infer<typeof collectionSchema>;
 
 export interface Collection extends CollectionFormData {
+  id: string;
+  createdBy: string;
+  createdAt: Timestamp | Date;
+}
+
+// Payment
+export const paymentSchema = z.object({
+  farmerId: z.string().min(1),
+  farmerName: z.string().min(1),
+  amount: z.number().min(0.01, 'Amount must be positive'),
+  paymentMethod: z.enum(['cash', 'upi', 'bank']),
+  notes: z.string().optional(),
+  paymentDate: z.coerce.date().optional(),
+  fromDate: z.coerce.date(),
+  toDate: z.coerce.date(),
+  totalDays: z.number(),
+  totalLiters: z.number(),
+  cowLiters: z.number(),
+  buffaloLiters: z.number(),
+  avgFat: z.number(),
+  avgSnf: z.number(),
+  milkAmount: z.number(),
+  deductionsAmount: z.number(),
+  previousBalance: z.number(),
+  bonus: z.number().default(0),
+  advanceRecovery: z.number().default(0),
+  netPayable: z.number(),
+});
+
+export type PaymentFormData = z.infer<typeof paymentSchema>;
+
+export interface Payment extends PaymentFormData {
   id: string;
   createdBy: string;
   createdAt: Timestamp | Date;
@@ -91,6 +130,52 @@ export interface LedgerEntry {
   balance: number;
   referenceId: string;
   createdAt: Timestamp | Date;
+  paymentPeriod?: string;
+}
+
+// Deduction Redesign
+export const deductionSchema = z.object({
+  farmerId: z.string().min(1),
+  farmerName: z.string().min(1),
+  amount: z.number().min(0.01, 'Amount must be positive'),
+  deductionType: z.enum(['penalty', 'purchase', 'recovery', 'adjustment', 'other']),
+  reason: z.enum([
+    'milk_spoiled', 'milk_rejected', 'low_fat_penalty', 'low_snf_penalty',
+    'advance_recovery', 'feed_purchase', 'medicine', 'transport',
+    'equipment_damage', 'loan_recovery', 'rate_adjustment', 'other'
+  ]),
+  notes: z.string().optional(),
+  fromDate: z.coerce.date(),
+  toDate: z.coerce.date(),
+  entryDate: z.coerce.date().optional(),
+  paymentId: z.string().nullable().optional(),
+  paymentStatus: z.enum(['pending', 'paid']).optional(),
+  voucherNo: z.string().optional()
+});
+
+export type DeductionFormData = z.infer<typeof deductionSchema>;
+
+export interface Deduction extends DeductionFormData {
+  id: string;
+  createdBy: string;
+  createdAt: Timestamp | Date;
+  deductionDate?: Timestamp | Date;
+}
+
+export interface AccountsEntry {
+  id: string;
+  voucherNo: string;
+  farmerId: string;
+  farmerName: string;
+  transactionType: 'deduction';
+  reason: string;
+  amount: number;
+  fromDate: Timestamp | Date;
+  toDate: Timestamp | Date;
+  entryDate: Timestamp | Date;
+  createdBy: string;
+  createdAt: Timestamp | Date;
+  centerId: string;
 }
 
 // Inventory & Purchases

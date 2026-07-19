@@ -3,8 +3,15 @@ import {
   Collection, RateChart, RateChartEntry, Farmer, LedgerEntry,
   InventoryItem, InventoryVariant, Supplier, PurchaseEntry, PurchaseEntryItem,
   SalesEntry, SalesEntryItem, StockAdjustment, SupplierPayment, InventoryLog,
-  InventorySettings
+  InventorySettings, Payment, Deduction, AccountsEntry
 } from '@/types';
+
+export interface OfflinePayment extends Payment {
+  centerId: string;
+  pendingSync: number; // 0 = synced, 1 = pending
+  isDeleted: number; // 0 = no, 1 = pending deletion sync
+  localUpdatedAt: number; // timestamp ms
+}
 
 export interface OfflineCollection extends Collection {
   centerId: string;
@@ -35,18 +42,15 @@ export interface OfflineLedgerEntry extends LedgerEntry {
   localUpdatedAt: number; // timestamp ms
 }
 
-export interface OfflineDeduction {
-  id: string;
-  farmerId: string;
-  farmerName: string;
-  amount: number;
-  reason: 'spoiled_milk' | 'rate_difference' | 'advance' | 'penalty' | 'other';
-  notes?: string;
-  deductionDate: Date;
-  createdBy: string;
-  createdAt: Date;
+export interface OfflineDeduction extends Deduction {
   centerId: string;
   pendingSync: number; // 0 = synced, 1 = pending
+  isDeleted: number;
+  localUpdatedAt: number;
+}
+
+export interface OfflineAccountsEntry extends AccountsEntry {
+  pendingSync: number;
   isDeleted: number;
   localUpdatedAt: number;
 }
@@ -169,6 +173,8 @@ class DoodhOSOfflineDB extends Dexie {
   ledger!: Table<OfflineLedgerEntry, string>;
   deductions!: Table<OfflineDeduction, string>;
   dispatches!: Table<OfflineDispatch, string>;
+  payments!: Table<OfflinePayment, string>;
+  accounts!: Table<OfflineAccountsEntry, string>;
   conflicts!: Table<SyncConflict, string>;
 
   // New Inventory Tables
@@ -186,14 +192,16 @@ class DoodhOSOfflineDB extends Dexie {
 
   constructor() {
     super('DoodhOSOfflineDB');
-    this.version(4).stores({
+    this.version(7).stores({
       collections: 'id, farmerId, centerId, pendingSync, isDeleted, localUpdatedAt',
       farmers: 'id, name, centerId, localUpdatedAt',
       rateCharts: 'id, animal, status, centerId, localUpdatedAt',
       rateChartEntries: 'id, rateChartId, centerId, localUpdatedAt',
-      ledger: 'id, farmerId, centerId, pendingSync, isDeleted, localUpdatedAt',
-      deductions: 'id, farmerId, centerId, pendingSync, isDeleted, localUpdatedAt',
+      ledger: 'id, farmerId, centerId, referenceId, pendingSync, isDeleted, localUpdatedAt',
+      deductions: 'id, farmerId, centerId, pendingSync, isDeleted, localUpdatedAt, fromDate, toDate',
       dispatches: 'id, shift, status, centerId, pendingSync, isDeleted, localUpdatedAt',
+      payments: 'id, farmerId, centerId, pendingSync, isDeleted, localUpdatedAt',
+      accounts: 'id, farmerId, centerId, voucherNo, pendingSync, isDeleted, localUpdatedAt',
       conflicts: 'id, type, createdAt',
 
       // Inventory Stores

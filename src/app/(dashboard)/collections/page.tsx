@@ -219,8 +219,20 @@ export default function CollectionsPage() {
                         </td>
                         <td className="px-6 py-4 text-[14px] font-bold text-[#111111]">{col.liters.toFixed(1)}</td>
                         <td className="px-6 py-4">
-                          <div className="text-[13px] text-[#111111]">{col.fat.toFixed(1)}</div>
-                          <div className="text-[11px] text-[#AAAAAA]">{col.snf.toFixed(1)}</div>
+                          <div className="text-[13px] text-[#111111] flex items-center gap-1.5">
+                            <span>{(col.enteredFat ?? col.fat).toFixed(1)}</span>
+                            {col.isNearestRateApplied && (
+                              <span className="text-[9px] font-extrabold px-1 py-0.2 rounded bg-orange-100 text-orange-600 uppercase border border-orange-200" title="Nearest rate applied">
+                                Nearest
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-[#AAAAAA]">{(col.enteredSnf ?? col.snf).toFixed(1)}</div>
+                          {col.isNearestRateApplied && col.matchedFat !== undefined && col.matchedSnf !== undefined && (
+                            <div className="text-[9px] text-[#FF6B00] font-semibold mt-1">
+                              Used: {col.matchedFat.toFixed(1)} / {col.matchedSnf.toFixed(1)}
+                            </div>
+                          )}
                         </td>
                         <td className="px-6 py-4 text-[13px] text-[#555]">₹{col.rate.toFixed(2)}</td>
                         <td className="px-6 py-4">

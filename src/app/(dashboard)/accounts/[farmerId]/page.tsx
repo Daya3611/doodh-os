@@ -134,7 +134,7 @@ export default function FarmerLedgerPage({ params }: { params: Promise<{ farmerI
           <table className="w-full" style={{ borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid #F0F0F0', background: '#FAFAFA' }}>
-                {['Date', 'Type', 'Description', 'Credit (+)', 'Debit (-)', 'Balance'].map(col => (
+                {['Date', 'Type', 'Description', 'Payment Period', 'Credit (+)', 'Debit (-)', 'Balance'].map(col => (
                   <th key={col} className="px-6 py-3.5 text-left text-[11px] font-bold uppercase tracking-wider text-[#777]">
                     {col}
                   </th>
@@ -144,7 +144,7 @@ export default function FarmerLedgerPage({ params }: { params: Promise<{ farmerI
             <tbody className="divide-y divide-[#F0F0F0]">
               {displayLedger.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="text-center py-10 text-[13px] text-[#777]">No transactions yet.</td>
+                  <td colSpan={7} className="text-center py-10 text-[13px] text-[#777]">No transactions yet.</td>
                 </tr>
               ) : (
                 displayLedger.map(l => {
@@ -162,6 +162,7 @@ export default function FarmerLedgerPage({ params }: { params: Promise<{ farmerI
                         </span>
                       </td>
                       <td className="px-6 py-4 text-[13px] text-[#555]">{l.description}</td>
+                      <td className="px-6 py-4 text-[13px] font-semibold text-slate-700">{l.paymentPeriod || '—'}</td>
                       <td className="px-6 py-4 text-[14px] font-semibold text-green-600">
                         {l.credit > 0 ? `₹${l.credit.toFixed(2)}` : '—'}
                       </td>

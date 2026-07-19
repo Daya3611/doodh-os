@@ -245,7 +245,10 @@ export default function DispatchPage() {
                 filtered.map((d, i) => {
                   let dateStr = 'N/A';
                   if (d.dispatchDate) {
-                    dateStr = format(new Date(d.dispatchDate), 'dd MMM yyyy');
+                    const jsDate = (d.dispatchDate as any).toDate 
+                      ? (d.dispatchDate as any).toDate() 
+                      : new Date(d.dispatchDate as any);
+                    dateStr = format(jsDate, 'dd MMM yyyy');
                   }
                   return (
                     <motion.tr

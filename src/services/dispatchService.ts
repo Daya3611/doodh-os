@@ -35,15 +35,23 @@ export const dispatchService = {
           orderBy('createdAt', 'desc')
         );
         const snap = await getDocs(q);
-        const cloudDispatches = snap.docs.map(d => ({ id: d.id, ...d.data() } as OfflineDispatch));
+        const cloudDispatches = snap.docs.map(doc => {
+          const d = doc.data();
+          const dispatchDate = d.dispatchDate ? (d.dispatchDate.toDate ? d.dispatchDate.toDate() : new Date(d.dispatchDate)) : new Date();
+          const createdAt = d.createdAt ? (d.createdAt.toDate ? d.createdAt.toDate() : new Date(d.createdAt)) : new Date();
+          return {
+            id: doc.id,
+            ...d,
+            dispatchDate,
+            createdAt
+          } as OfflineDispatch;
+        });
 
         // Sync to IndexedDB cache
         const syncTime = Date.now();
         for (const d of cloudDispatches) {
           await offlineDb.dispatches.put({
             ...d,
-            dispatchDate: (d.dispatchDate as any).toDate ? (d.dispatchDate as any).toDate() : new Date(d.dispatchDate as any),
-            createdAt: (d.createdAt as any).toDate ? (d.createdAt as any).toDate() : new Date(d.createdAt as any),
             centerId,
             pendingSync: 0,
             isDeleted: 0,

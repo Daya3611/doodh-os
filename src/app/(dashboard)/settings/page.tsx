@@ -23,7 +23,7 @@ const sections = [
 export default function SettingsPage() {
   const { profile } = useAuthStore();
   const [activeSection, setActiveSection] = useState('center');
-  
+
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -31,7 +31,7 @@ export default function SettingsPage() {
   const [ownerName, setOwnerName] = useState(profile?.name || '');
   const [address, setAddress] = useState('Village Road, District, State');
   const [phone, setPhone] = useState('');
-  
+
   const [smsEnabled, setSmsEnabled] = useState(false);
   const [whatsappEnabled, setWhatsappEnabled] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
@@ -107,153 +107,153 @@ export default function SettingsPage() {
         ) : (
           <>
             {activeSection === 'center' && (
-          <div className="space-y-5">
-            <div className="text-[16px] font-bold text-[#111111] mb-5">Center Information</div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="text-[12px] font-semibold text-[#777777] uppercase tracking-wider mb-2 block">Center Name</label>
-                <input className={inputClass} style={inputStyle} value={centerName} onChange={e => setCenterName(e.target.value)} onFocus={focusStyle} onBlur={blurStyle} />
-              </div>
-              <div>
-                <label className="text-[12px] font-semibold text-[#777777] uppercase tracking-wider mb-2 block">Owner Name</label>
-                <input className={inputClass} style={inputStyle} value={ownerName} onChange={e => setOwnerName(e.target.value)} onFocus={focusStyle} onBlur={blurStyle} />
-              </div>
-              <div className="sm:col-span-2">
-                <label className="text-[12px] font-semibold text-[#777777] uppercase tracking-wider mb-2 block">Address</label>
-                <input className={inputClass} style={inputStyle} value={address} onChange={e => setAddress(e.target.value)} onFocus={focusStyle} onBlur={blurStyle} />
-              </div>
-              <div>
-                <label className="text-[12px] font-semibold text-[#777777] uppercase tracking-wider mb-2 block">Phone</label>
-                <input className={inputClass} style={inputStyle} value={phone} onChange={e => setPhone(e.target.value)} placeholder="Center contact number" onFocus={focusStyle} onBlur={blurStyle} />
-              </div>
-            </div>
-          </div>
-        )}
-
-        {activeSection === 'receipt' && (
-          <div className="space-y-5">
-            <div className="text-[16px] font-bold text-[#111111] mb-5">Receipt & Printer Settings</div>
-            <div className="flex items-center justify-between p-5 rounded-xl border border-slate-200 bg-white">
-              <div>
-                <div className="text-[15px] font-bold text-[#111111] flex items-center gap-2"><Receipt size={18} className="text-[#FF6B00]" /> Advanced Printer Management</div>
-                <div className="text-[13px] text-[#777777] mt-1">Configure Thermal and A4 receipt printers, templates, logos, and auto-print logic.</div>
-              </div>
-              <button
-                onClick={() => window.location.href = '/settings/printer'}
-                className="px-5 py-2.5 rounded-lg text-sm font-semibold bg-[#FFF5EE] text-[#FF6B00] hover:bg-[#FFE8D6] transition-colors whitespace-nowrap"
-              >
-                Configure Printer
-              </button>
-            </div>
-          </div>
-        )}
-
-        {activeSection === 'notifications' && (
-          <div className="space-y-4">
-            <div className="text-[16px] font-bold text-[#111111] mb-5">Notification Channels</div>
-            {[
-              { label: 'SMS Notifications', desc: 'Send payment confirmations via SMS', value: smsEnabled, toggle: () => setSmsEnabled(v => !v) },
-              { label: 'WhatsApp Notifications', desc: 'Send receipts and updates via WhatsApp', value: whatsappEnabled, toggle: () => setWhatsappEnabled(v => !v) },
-            ].map(item => (
-              <div key={item.label} className="flex items-center justify-between p-4 rounded-xl" style={{ background: '#F7F7F7' }}>
-                <div>
-                  <div className="text-[14px] font-semibold text-[#111111]">{item.label}</div>
-                  <div className="text-[12px] text-[#777777]">{item.desc}</div>
+              <div className="space-y-5">
+                <div className="text-[16px] font-bold text-[#111111] mb-5">Center Information</div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[12px] font-semibold text-[#777777] uppercase tracking-wider mb-2 block">Center Name</label>
+                    <input className={inputClass} style={inputStyle} value={centerName} onChange={e => setCenterName(e.target.value)} onFocus={focusStyle} onBlur={blurStyle} />
+                  </div>
+                  <div>
+                    <label className="text-[12px] font-semibold text-[#777777] uppercase tracking-wider mb-2 block">Owner Name</label>
+                    <input className={inputClass} style={inputStyle} value={ownerName} onChange={e => setOwnerName(e.target.value)} onFocus={focusStyle} onBlur={blurStyle} />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="text-[12px] font-semibold text-[#777777] uppercase tracking-wider mb-2 block">Address</label>
+                    <input className={inputClass} style={inputStyle} value={address} onChange={e => setAddress(e.target.value)} onFocus={focusStyle} onBlur={blurStyle} />
+                  </div>
+                  <div>
+                    <label className="text-[12px] font-semibold text-[#777777] uppercase tracking-wider mb-2 block">Phone</label>
+                    <input className={inputClass} style={inputStyle} value={phone} onChange={e => setPhone(e.target.value)} placeholder="Center contact number" onFocus={focusStyle} onBlur={blurStyle} />
+                  </div>
                 </div>
-                <Toggle value={item.value} onChange={item.toggle} />
               </div>
-            ))}
-          </div>
-        )}
+            )}
 
-        {activeSection === 'backup' && (
-          <div className="space-y-5">
-            <div className="text-[16px] font-bold text-[#111111] mb-5">Backup & Database Restore</div>
-            <div className="space-y-4">
-              <div className="p-5 rounded-xl border border-slate-200 bg-white flex items-center justify-between">
-                <div>
-                  <div className="text-[14px] font-bold text-[#111111]">Export Local Database</div>
-                  <div className="text-[12px] text-[#777777] mt-1">Download a JSON snapshot of your collections, ledger transactions, rate charts, and farmers list.</div>
-                </div>
-                <button
-                  onClick={() => {
-                    if (profile?.centerId) {
-                      backupService.exportBackup(profile.centerId);
-                    } else {
-                      toast.error("Center ID not found");
-                    }
-                  }}
-                  className="px-5 py-2.5 rounded-lg text-sm font-semibold bg-[#FFF5EE] text-[#FF6B00] hover:bg-[#FFE8D6] transition-colors"
-                >
-                  Export JSON
-                </button>
-              </div>
-
-              <div className="p-5 rounded-xl border border-slate-200 bg-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                <div>
-                  <div className="text-[14px] font-bold text-[#111111]">Import Database Snapshot</div>
-                  <div className="text-[12px] text-[#777777] mt-1">Select a previously exported DoodhOS JSON backup file to overwrite local state and queue for sync.</div>
-                </div>
-                <div className="relative">
-                  <input
-                    type="file"
-                    accept=".json"
-                    id="restore-upload"
-                    className="hidden"
-                    onChange={async (e) => {
-                      const file = e.target.files?.[0];
-                      if (file && profile?.centerId) {
-                        const ok = await backupService.importBackup(file, profile.centerId);
-                        if (ok) {
-                          window.location.reload();
-                        }
-                      }
-                    }}
-                  />
-                  <label
-                    htmlFor="restore-upload"
-                    className="px-5 py-2.5 rounded-lg text-sm font-semibold bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors cursor-pointer inline-block"
+            {activeSection === 'receipt' && (
+              <div className="space-y-5">
+                <div className="text-[16px] font-bold text-[#111111] mb-5">Receipt & Printer Settings</div>
+                <div className="flex items-center justify-between p-5 rounded-xl border border-slate-200 bg-white">
+                  <div>
+                    <div className="text-[15px] font-bold text-[#111111] flex items-center gap-2"><Receipt size={18} className="text-[#FF6B00]" /> Advanced Printer Management</div>
+                    <div className="text-[13px] text-[#777777] mt-1">Configure Thermal and A4 receipt printers, templates, logos, and auto-print logic.</div>
+                  </div>
+                  <button
+                    onClick={() => window.location.href = '/settings/printer'}
+                    className="px-5 py-2.5 rounded-lg text-sm font-semibold bg-[#FFF5EE] text-[#FF6B00] hover:bg-[#FFE8D6] transition-colors whitespace-nowrap"
                   >
-                    Select File
-                  </label>
+                    Configure Printer
+                  </button>
                 </div>
               </div>
-            </div>
-          </div>
-        )}
+            )}
 
-        {activeSection === 'system' && (
-          <div className="space-y-4">
-            <div className="text-[16px] font-bold text-[#111111] mb-5">System Preferences</div>
-            <div className="flex items-center justify-between p-4 rounded-xl" style={{ background: '#F7F7F7' }}>
-              <div>
-                <div className="text-[14px] font-semibold text-[#111111]">Dark Mode</div>
-                <div className="text-[12px] text-[#777777]">Switch to dark theme</div>
+            {activeSection === 'notifications' && (
+              <div className="space-y-4">
+                <div className="text-[16px] font-bold text-[#111111] mb-5">Notification Channels</div>
+                {[
+                  { label: 'SMS Notifications', desc: 'Send payment confirmations via SMS', value: smsEnabled, toggle: () => setSmsEnabled(v => !v) },
+                  // { label: 'WhatsApp Notifications', desc: 'Send receipts and updates via WhatsApp', value: whatsappEnabled, toggle: () => setWhatsappEnabled(v => !v) },
+                ].map(item => (      // whatsappEnabled, toggle: () => setWhatsappEnabled(v => !v) },
+                  <div key={item.label} className="flex items-center justify-between p-4 rounded-xl" style={{ background: '#F7F7F7' }}>
+                    <div>
+                      <div className="text-[14px] font-semibold text-[#111111]">{item.label}</div>
+                      <div className="text-[12px] text-[#777777]">{item.desc}</div>
+                    </div>
+                    <Toggle value={item.value} onChange={item.toggle} />
+                  </div>
+                ))}
               </div>
-              <Toggle value={darkMode} onChange={() => setDarkMode(v => !v)} />
-            </div>
-            <div>
-              <label className="text-[12px] font-semibold text-[#777777] uppercase tracking-wider mb-2 block">Language</label>
-              <select className="w-full px-4 py-3 text-[14px] rounded-xl outline-none transition-all" style={inputStyle} value={language} onChange={e => setLanguage(e.target.value)}>
-                <option value="en">English</option>
-                <option value="hi">हिन्दी (Hindi)</option>
-                <option value="mr">मराठी (Marathi)</option>
-              </select>
-            </div>
-          </div>
-        )}
+            )}
 
-        {/* Save Button */}
-        <div className="pt-6 mt-6 border-t border-[#F0F0F0]">
-          <motion.button
-            whileHover={{ scale: 1.01, y: -1 }} whileTap={{ scale: 0.99 }}
-            onClick={handleSave} disabled={isSaving}
-            className="flex items-center gap-2 px-6 py-2.5 text-[14px] font-semibold text-white disabled:opacity-50"
-            style={{ background: '#FF6B00', borderRadius: '14px', boxShadow: '0 2px 8px rgba(255,107,0,0.3)' }}
-          >
-            {isSaving ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />} Save Changes
-          </motion.button>
-        </div>
+            {activeSection === 'backup' && (
+              <div className="space-y-5">
+                <div className="text-[16px] font-bold text-[#111111] mb-5">Backup & Database Restore</div>
+                <div className="space-y-4">
+                  <div className="p-5 rounded-xl border border-slate-200 bg-white flex items-center justify-between">
+                    <div>
+                      <div className="text-[14px] font-bold text-[#111111]">Export Local Database</div>
+                      <div className="text-[12px] text-[#777777] mt-1">Download a JSON snapshot of your collections, ledger transactions, rate charts, and farmers list.</div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        if (profile?.centerId) {
+                          backupService.exportBackup(profile.centerId);
+                        } else {
+                          toast.error("Center ID not found");
+                        }
+                      }}
+                      className="px-5 py-2.5 rounded-lg text-sm font-semibold bg-[#FFF5EE] text-[#FF6B00] hover:bg-[#FFE8D6] transition-colors"
+                    >
+                      Export JSON
+                    </button>
+                  </div>
+
+                  <div className="p-5 rounded-xl border border-slate-200 bg-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                    <div>
+                      <div className="text-[14px] font-bold text-[#111111]">Import Database Snapshot</div>
+                      <div className="text-[12px] text-[#777777] mt-1">Select a previously exported DoodhOS JSON backup file to overwrite local state and queue for sync.</div>
+                    </div>
+                    <div className="relative">
+                      <input
+                        type="file"
+                        accept=".json"
+                        id="restore-upload"
+                        className="hidden"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (file && profile?.centerId) {
+                            const ok = await backupService.importBackup(file, profile.centerId);
+                            if (ok) {
+                              window.location.reload();
+                            }
+                          }
+                        }}
+                      />
+                      <label
+                        htmlFor="restore-upload"
+                        className="px-5 py-2.5 rounded-lg text-sm font-semibold bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors cursor-pointer inline-block"
+                      >
+                        Select File
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeSection === 'system' && (
+              <div className="space-y-4">
+                <div className="text-[16px] font-bold text-[#111111] mb-5">System Preferences</div>
+                <div className="flex items-center justify-between p-4 rounded-xl" style={{ background: '#F7F7F7' }}>
+                  <div>
+                    <div className="text-[14px] font-semibold text-[#111111]">Dark Mode</div>
+                    <div className="text-[12px] text-[#777777]">Switch to dark theme</div>
+                  </div>
+                  <Toggle value={darkMode} onChange={() => setDarkMode(v => !v)} />
+                </div>
+                <div>
+                  <label className="text-[12px] font-semibold text-[#777777] uppercase tracking-wider mb-2 block">Language</label>
+                  <select className="w-full px-4 py-3 text-[14px] rounded-xl outline-none transition-all" style={inputStyle} value={language} onChange={e => setLanguage(e.target.value)}>
+                    <option value="en">English</option>
+                    <option value="hi">हिन्दी (Hindi)</option>
+                    <option value="mr">मराठी (Marathi)</option>
+                  </select>
+                </div>
+              </div>
+            )}
+
+            {/* Save Button */}
+            <div className="pt-6 mt-6 border-t border-[#F0F0F0]">
+              <motion.button
+                whileHover={{ scale: 1.01, y: -1 }} whileTap={{ scale: 0.99 }}
+                onClick={handleSave} disabled={isSaving}
+                className="flex items-center gap-2 px-6 py-2.5 text-[14px] font-semibold text-white disabled:opacity-50"
+                style={{ background: '#FF6B00', borderRadius: '14px', boxShadow: '0 2px 8px rgba(255,107,0,0.3)' }}
+              >
+                {isSaving ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />} Save Changes
+              </motion.button>
+            </div>
           </>
         )}
       </motion.div>

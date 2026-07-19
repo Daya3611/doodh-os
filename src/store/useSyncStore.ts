@@ -65,7 +65,22 @@ export const useSyncStore = create<SyncState>((set, get) => ({
       .and(p => p.pendingSync === 1)
       .count();
 
-    const total = colCount + ledgerCount + itemCount + supplierCount + purchaseCount + saleCount + adjCount + paymentCount;
+    const deductionCount = await offlineDb.deductions
+      .where('centerId').equals(centerId)
+      .and(d => d.pendingSync === 1)
+      .count();
+
+    const farmerPaymentCount = await offlineDb.payments
+      .where('centerId').equals(centerId)
+      .and(p => p.pendingSync === 1)
+      .count();
+
+    const accountsCount = await offlineDb.accounts
+      .where('centerId').equals(centerId)
+      .and(a => a.pendingSync === 1)
+      .count();
+
+    const total = colCount + ledgerCount + itemCount + supplierCount + purchaseCount + saleCount + adjCount + paymentCount + deductionCount + farmerPaymentCount + accountsCount;
     set({ pendingCount: total });
     return total;
   },

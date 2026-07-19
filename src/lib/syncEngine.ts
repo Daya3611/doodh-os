@@ -10,9 +10,9 @@ import {
   where, 
   Timestamp 
 } from 'firebase/firestore';
-import { offlineDb, OfflineCollection, OfflineLedgerEntry, OfflineFarmer, OfflineRateChart, OfflineRateChartEntry } from './offlineDb';
+import { offlineDb, OfflineCollection, OfflineLedgerEntry, OfflineFarmer, OfflineRateChart, OfflineRateChartEntry, OfflinePayment } from './offlineDb';
 import { recalculateAndSyncFarmerBalance } from './balance';
-import { Collection, Farmer, LedgerEntry, RateChart, RateChartEntry } from '@/types';
+import { Collection, Farmer, LedgerEntry, RateChart, RateChartEntry, Payment } from '@/types';
 
 // Helper to get last sync time
 function getLastSyncTime(centerId: string): number {
@@ -124,7 +124,10 @@ export const syncEngine = {
       const { pendingSync, isDeleted, localUpdatedAt, ...uploadData } = localDed;
       const fbData = {
         ...uploadData,
-        deductionDate: localDed.deductionDate ? Timestamp.fromDate(new Date(localDed.deductionDate as any)) : new Date(),
+        fromDate: localDed.fromDate ? Timestamp.fromDate(new Date(localDed.fromDate as any)) : null,
+        toDate: localDed.toDate ? Timestamp.fromDate(new Date(localDed.toDate as any)) : null,
+        entryDate: localDed.entryDate ? Timestamp.fromDate(new Date(localDed.entryDate as any)) : null,
+        deductionDate: localDed.deductionDate ? Timestamp.fromDate(new Date(localDed.deductionDate as any)) : null,
         createdAt: localDed.createdAt ? Timestamp.fromDate(new Date(localDed.createdAt as any)) : new Date()
       };
       await setDoc(dedRef, fbData);
@@ -154,6 +157,60 @@ export const syncEngine = {
       };
       await setDoc(dispRef, fbData);
       await offlineDb.dispatches.update(localDisp.id, { pendingSync: 0 });
+    }
+
+    // 4.5 Upload pending Farmer Payments
+    const pendingFarmerPayments = await offlineDb.payments
+      .where('centerId').equals(centerId)
+      .and(p => p.pendingSync === 1)
+      .toArray();
+
+    for (const localPay of pendingFarmerPayments) {
+      const payRef = firestoreDoc(db, 'centers', centerId, 'payments', localPay.id);
+
+      if (localPay.isDeleted === 1) {
+        await deleteDoc(payRef);
+        await offlineDb.payments.delete(localPay.id);
+        continue;
+      }
+
+      const { pendingSync, isDeleted, localUpdatedAt, ...uploadData } = localPay;
+      const fbData = {
+        ...uploadData,
+        paymentDate: localPay.paymentDate ? Timestamp.fromDate(new Date(localPay.paymentDate as any)) : new Date(),
+        fromDate: localPay.fromDate ? Timestamp.fromDate(new Date(localPay.fromDate as any)) : new Date(),
+        toDate: localPay.toDate ? Timestamp.fromDate(new Date(localPay.toDate as any)) : new Date(),
+        createdAt: localPay.createdAt ? Timestamp.fromDate(new Date(localPay.createdAt as any)) : new Date()
+      };
+      await setDoc(payRef, fbData);
+      await offlineDb.payments.update(localPay.id, { pendingSync: 0 });
+    }
+
+    // 4.6 Upload pending Accounts entries
+    const pendingAccounts = await offlineDb.accounts
+      .where('centerId').equals(centerId)
+      .and(a => a.pendingSync === 1)
+      .toArray();
+
+    for (const localAcc of pendingAccounts) {
+      const accRef = firestoreDoc(db, 'centers', centerId, 'accounts', localAcc.id);
+
+      if (localAcc.isDeleted === 1) {
+        await deleteDoc(accRef);
+        await offlineDb.accounts.delete(localAcc.id);
+        continue;
+      }
+
+      const { pendingSync, isDeleted, localUpdatedAt, ...uploadData } = localAcc;
+      const fbData = {
+        ...uploadData,
+        fromDate: localAcc.fromDate ? Timestamp.fromDate(new Date(localAcc.fromDate as any)) : null,
+        toDate: localAcc.toDate ? Timestamp.fromDate(new Date(localAcc.toDate as any)) : null,
+        entryDate: localAcc.entryDate ? Timestamp.fromDate(new Date(localAcc.entryDate as any)) : new Date(),
+        createdAt: localAcc.createdAt ? Timestamp.fromDate(new Date(localAcc.createdAt as any)) : new Date()
+      };
+      await setDoc(accRef, fbData);
+      await offlineDb.accounts.update(localAcc.id, { pendingSync: 0 });
     }
 
     // 5. Upload pending Inventory Items
@@ -432,12 +489,18 @@ export const syncEngine = {
     const dedSnap = await getDocs(firestoreCollection(db, 'centers', centerId, 'deductions'));
     const deductionsList = dedSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
     for (const d of deductionsList) {
-      const deductionDateVal = (d.deductionDate as any)?.toDate?.() || new Date(d.deductionDate as any);
+      const deductionDateVal = d.deductionDate ? ((d.deductionDate as any)?.toDate?.() || new Date(d.deductionDate as any)) : new Date();
+      const fromDateVal = d.fromDate ? ((d.fromDate as any)?.toDate?.() || new Date(d.fromDate as any)) : deductionDateVal;
+      const toDateVal = d.toDate ? ((d.toDate as any)?.toDate?.() || new Date(d.toDate as any)) : deductionDateVal;
+      const entryDateVal = d.entryDate ? ((d.entryDate as any)?.toDate?.() || new Date(d.entryDate as any)) : deductionDateVal;
       const createdAtDate = (d.createdAt as any)?.toDate?.() || new Date(d.createdAt as any);
 
       await offlineDb.deductions.put({
         ...d,
         deductionDate: deductionDateVal,
+        fromDate: fromDateVal,
+        toDate: toDateVal,
+        entryDate: entryDateVal,
         createdAt: createdAtDate,
         centerId,
         pendingSync: 0,
@@ -448,14 +511,58 @@ export const syncEngine = {
 
     // 6. Download Dispatches
     const dispSnap = await getDocs(firestoreCollection(db, 'centers', centerId, 'dispatches'));
-    const dispatchList = dispSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
-    for (const d of dispatchList) {
+    const dispatchesList = dispSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+    for (const d of dispatchesList) {
       const dispatchDateVal = (d.dispatchDate as any)?.toDate?.() || new Date(d.dispatchDate as any);
       const createdAtDate = (d.createdAt as any)?.toDate?.() || new Date(d.createdAt as any);
 
       await offlineDb.dispatches.put({
         ...d,
         dispatchDate: dispatchDateVal,
+        createdAt: createdAtDate,
+        centerId,
+        pendingSync: 0,
+        isDeleted: 0,
+        localUpdatedAt: syncTime
+      });
+    }
+
+    // 6.6 Download Accounts entries
+    const accSnap = await getDocs(firestoreCollection(db, 'centers', centerId, 'accounts'));
+    const accountsList = accSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+    for (const a of accountsList) {
+      const fromDateVal = a.fromDate ? ((a.fromDate as any)?.toDate?.() || new Date(a.fromDate as any)) : new Date();
+      const toDateVal = a.toDate ? ((a.toDate as any)?.toDate?.() || new Date(a.toDate as any)) : new Date();
+      const entryDateVal = a.entryDate ? ((a.entryDate as any)?.toDate?.() || new Date(a.entryDate as any)) : new Date();
+      const createdAtDate = (a.createdAt as any)?.toDate?.() || new Date(a.createdAt as any);
+
+      await offlineDb.accounts.put({
+        ...a,
+        fromDate: fromDateVal,
+        toDate: toDateVal,
+        entryDate: entryDateVal,
+        createdAt: createdAtDate,
+        centerId,
+        pendingSync: 0,
+        isDeleted: 0,
+        localUpdatedAt: syncTime
+      });
+    }
+
+    // 6.5 Download Farmer Payments
+    const paySnap = await getDocs(firestoreCollection(db, 'centers', centerId, 'payments'));
+    const farmerPaymentsList = paySnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+    for (const p of farmerPaymentsList) {
+      const paymentDateVal = (p.paymentDate as any)?.toDate?.() || new Date(p.paymentDate as any);
+      const fromDateVal = (p.fromDate as any)?.toDate?.() || new Date(p.fromDate as any);
+      const toDateVal = (p.toDate as any)?.toDate?.() || new Date(p.toDate as any);
+      const createdAtDate = (p.createdAt as any)?.toDate?.() || new Date(p.createdAt as any);
+
+      await offlineDb.payments.put({
+        ...p,
+        paymentDate: paymentDateVal,
+        fromDate: fromDateVal,
+        toDate: toDateVal,
         createdAt: createdAtDate,
         centerId,
         pendingSync: 0,

@@ -4,6 +4,87 @@ import { RateChart, RateChartFormData, RateChartEntry, AnimalType } from '@/type
 import { offlineDb } from '@/lib/offlineDb';
 import { startOfDay, endOfDay, subDays } from 'date-fns';
 
+export interface RateLookupResult {
+  rate: number;
+  matchedFat: number;
+  matchedSnf: number;
+  isNearestApplied: boolean;
+}
+
+function findNearestSorted(arr: number[], target: number): number {
+  if (arr.length === 0) return target;
+  if (target <= arr[0]) return arr[0];
+  if (target >= arr[arr.length - 1]) return arr[arr.length - 1];
+
+  let left = 0;
+  let right = arr.length - 1;
+
+  while (left <= right) {
+    const mid = Math.floor((left + right) / 2);
+    if (arr[mid] === target) {
+      return arr[mid];
+    } else if (arr[mid] < target) {
+      left = mid + 1;
+    } else {
+      right = mid - 1;
+    }
+  }
+
+  const valLeft = arr[left];
+  const valRight = arr[right];
+  if (Math.abs(valLeft - target) < Math.abs(valRight - target)) {
+    return valLeft;
+  } else {
+    return valRight;
+  }
+}
+
+export function lookupRateInEntries(entries: RateChartEntry[], enteredFat: number, enteredSnf: number): RateLookupResult {
+  if (entries.length === 0) {
+    return { rate: 0, matchedFat: enteredFat, matchedSnf: enteredSnf, isNearestApplied: false };
+  }
+
+  // 1. Load all available unique FAT values, sorted ascending
+  const uniqueFats = Array.from(new Set(entries.map(e => e.fat))).sort((a, b) => a - b);
+  
+  if (uniqueFats.length === 0) {
+    return { rate: 0, matchedFat: enteredFat, matchedSnf: enteredSnf, isNearestApplied: false };
+  }
+
+  // 2. Find the nearest FAT value
+  const matchedFat = findNearestSorted(uniqueFats, enteredFat);
+
+  // 3. Filter entries for the matched FAT value
+  const fatEntries = entries.filter(e => e.fat === matchedFat);
+  if (fatEntries.length === 0) {
+    return { rate: 0, matchedFat, matchedSnf: enteredSnf, isNearestApplied: true };
+  }
+
+  // 4. Load all available unique SNF values for this FAT, sorted ascending
+  const uniqueSnfs = Array.from(new Set(fatEntries.map(e => e.snf))).sort((a, b) => a - b);
+  
+  if (uniqueSnfs.length === 0) {
+    return { rate: 0, matchedFat, matchedSnf: enteredSnf, isNearestApplied: true };
+  }
+
+  // 5. Find the nearest SNF value
+  const matchedSnf = findNearestSorted(uniqueSnfs, enteredSnf);
+
+  // 6. Find the rate entry matching matchedFat and matchedSnf
+  const finalEntry = fatEntries.find(e => e.snf === matchedSnf);
+  const rate = finalEntry ? finalEntry.rate : 0;
+
+  // Nearest is applied if the matched FAT/SNF doesn't match the entered values exactly
+  const isNearestApplied = Math.abs(matchedFat - enteredFat) > 0.01 || Math.abs(matchedSnf - enteredSnf) > 0.01;
+
+  return {
+    rate,
+    matchedFat,
+    matchedSnf,
+    isNearestApplied
+  };
+}
+
 export const rateChartService = {
   getCollectionRef: (centerId: string) => collection(db, 'centers', centerId, 'rateCharts'),
   getEntriesRef: (centerId: string, chartId: string) => collection(db, 'centers', centerId, 'rateCharts', chartId, 'rateChartEntries'),
@@ -94,133 +175,102 @@ export const rateChartService = {
     }
   },
 
-  getRate: async (centerId: string, animal: AnimalType, fat: number, snf: number, date: Date = new Date()): Promise<number> => {
+  lookupRate: async (
+    centerId: string,
+    animal: AnimalType,
+    fat: number,
+    snf: number,
+    date: Date = new Date()
+  ): Promise<RateLookupResult> => {
+    // 1. Fetch charts (either from local database or online sync)
+    let allCharts = await offlineDb.rateCharts
+      .where('centerId').equals(centerId)
+      .and(c => c.animal === animal)
+      .toArray();
+
     const isOnline = typeof window !== 'undefined' && navigator.onLine;
 
-    if (isOnline) {
+    if (allCharts.length === 0 && isOnline) {
       try {
-        // Ensure statuses are synced before evaluating
         await rateChartService.syncRateChartStatuses(centerId);
-
         const q = query(
           rateChartService.getCollectionRef(centerId),
           where('animal', '==', animal)
         );
         const snapshot = await getDocs(q);
-        const allCharts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as RateChart));
+        const cloudCharts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as RateChart));
         
-        // Cache charts in IndexedDB
+        const now = Date.now();
+        allCharts = cloudCharts.map(c => ({
+          ...c,
+          centerId,
+          localUpdatedAt: now
+        }));
+        
         for (const c of allCharts) {
-          await offlineDb.rateCharts.put({
-            ...c,
-            centerId,
-            localUpdatedAt: Date.now()
-          });
-        }
-        
-        // Find matching chart
-        let matchingChart = allCharts.find(c => {
-          if (!c.effectiveFrom) return c.status === 'active';
-          const from = c.effectiveFrom instanceof Timestamp ? c.effectiveFrom.toDate() : new Date(c.effectiveFrom);
-          const until = c.effectiveUntil ? (c.effectiveUntil instanceof Timestamp ? c.effectiveUntil.toDate() : new Date(c.effectiveUntil)) : null;
-          return date >= from && (until === null || date <= until);
-        });
-
-        if (!matchingChart) {
-          matchingChart = allCharts.find(c => c.status === 'active');
-        }
-
-        if (matchingChart) {
-          const chartId = matchingChart.id;
-          
-          // Try close match query first (within 0.05 range)
-          const entriesQuery = query(
-            rateChartService.getEntriesRef(centerId, chartId),
-            where('fat', '>=', fat - 0.05),
-            where('fat', '<=', fat + 0.05)
-          );
-          const entrySnapshot = await getDocs(entriesQuery);
-          const entries = entrySnapshot.docs.map(d => ({ id: d.id, ...d.data() } as RateChartEntry));
-
-          // Cache entries in IndexedDB
-          for (const e of entries) {
-            await offlineDb.rateChartEntries.put({
-              ...e,
-              centerId,
-              localUpdatedAt: Date.now()
-            });
-          }
-
-          const match = entries.find(d => Math.abs(d.snf - snf) < 0.05);
-          if (match) return match.rate || 0;
-
-          // If no close match, fetch all entries to perform nearest neighbor search
-          const allEntriesSnap = await getDocs(rateChartService.getEntriesRef(centerId, chartId));
-          const allEntries = allEntriesSnap.docs.map(d => ({ id: d.id, ...d.data() } as RateChartEntry));
-
-          for (const e of allEntries) {
-            await offlineDb.rateChartEntries.put({
-              ...e,
-              centerId,
-              localUpdatedAt: Date.now()
-            });
-          }
-
-          const sorted = allEntries.sort((a, b) => {
-            const distA = Math.pow(a.fat - fat, 2) + Math.pow(a.snf - snf, 2);
-            const distB = Math.pow(b.fat - fat, 2) + Math.pow(b.snf - snf, 2);
-            return distA - distB;
-          });
-
-          if (sorted.length > 0) return sorted[0].rate || 0;
+          await offlineDb.rateCharts.put(c);
         }
       } catch (err) {
-        console.warn("Failed to get rate online, using local cache:", err);
+        console.warn("Failed to fetch rate charts for lookup:", err);
       }
     }
 
-    // Offline mode or online check failed
-    try {
-      const allCharts = await offlineDb.rateCharts
-        .where('centerId').equals(centerId)
-        .and(c => c.animal === animal)
-        .toArray();
+    // Find the matching chart
+    let matchingChart = allCharts.find(c => {
+      if (!c.effectiveFrom) return c.status === 'active';
+      const from = c.effectiveFrom instanceof Timestamp ? c.effectiveFrom.toDate() : new Date(c.effectiveFrom as any);
+      const until = c.effectiveUntil
+        ? (c.effectiveUntil instanceof Timestamp ? c.effectiveUntil.toDate() : new Date(c.effectiveUntil as any))
+        : null;
+      return date >= from && (until === null || date <= until);
+    });
 
-      let matchingChart = allCharts.find(c => {
-        if (!c.effectiveFrom) return c.status === 'active';
-        const from = new Date(c.effectiveFrom as any);
-        const until = c.effectiveUntil ? new Date(c.effectiveUntil as any) : null;
-        return date >= from && (until === null || date <= until);
-      });
-
-      if (!matchingChart) {
-        matchingChart = allCharts.find(c => c.status === 'active');
-      }
-
-      if (!matchingChart) return 0;
-
-      const entries = await offlineDb.rateChartEntries
-        .where('rateChartId').equals(matchingChart.id)
-        .toArray();
-
-      const exactMatch = entries.find(e => 
-        Math.abs(e.fat - fat) < 0.05 && Math.abs(e.snf - snf) < 0.05
-      );
-      if (exactMatch) return exactMatch.rate;
-
-      // 2D Nearest Neighbor matching using Euclidean distance
-      const sorted = entries.sort((a, b) => {
-        const distA = Math.pow(a.fat - fat, 2) + Math.pow(a.snf - snf, 2);
-        const distB = Math.pow(b.fat - fat, 2) + Math.pow(b.snf - snf, 2);
-        return distA - distB;
-      });
-
-      if (sorted.length > 0) return sorted[0].rate;
-      return 0;
-    } catch (err) {
-      console.error("Failed to lookup offline rate:", err);
-      return 0;
+    if (!matchingChart) {
+      matchingChart = allCharts.find(c => c.status === 'active');
     }
+
+    if (!matchingChart) {
+      return { rate: 0, matchedFat: fat, matchedSnf: snf, isNearestApplied: false };
+    }
+
+    // 2. Fetch chart entries
+    let entries = await offlineDb.rateChartEntries
+      .where('rateChartId').equals(matchingChart.id)
+      .toArray();
+
+    if (entries.length === 0 && isOnline) {
+      try {
+        const allEntriesSnap = await getDocs(rateChartService.getEntriesRef(centerId, matchingChart.id));
+        const cloudEntries = allEntriesSnap.docs.map(d => ({ id: d.id, ...d.data() } as RateChartEntry));
+        
+        const now = Date.now();
+        entries = cloudEntries.map(e => ({
+          ...e,
+          centerId,
+          localUpdatedAt: now
+        }));
+
+        for (const e of entries) {
+          await offlineDb.rateChartEntries.put(e);
+        }
+      } catch (err) {
+        console.warn("Failed to fetch rate entries for lookup:", err);
+      }
+    }
+
+    // 3. Apply lookup algorithm
+    return lookupRateInEntries(entries, fat, snf);
+  },
+
+  getRate: async (
+    centerId: string,
+    animal: AnimalType,
+    fat: number,
+    snf: number,
+    date: Date = new Date()
+  ): Promise<number> => {
+    const result = await rateChartService.lookupRate(centerId, animal, fat, snf, date);
+    return result.rate;
   },
 
   getEntries: async (centerId: string, chartId: string): Promise<RateChartEntry[]> => {

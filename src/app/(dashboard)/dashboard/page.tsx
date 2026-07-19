@@ -232,7 +232,7 @@ export default function DashboardPage() {
   }, [rawCollections, rawFarmers, rawLedgers, filterType, customStart, customEnd]);
 
   const summaryCards = [
-    { title: "Today's Collection", value: `${todayLiters.toFixed(1)} L`, sub: 'Liters collected today', icon: Droplets, color: '#FF6B00', bg: '#FFF3E8' },
+    { title: "Total Collection", value: `${todayLiters.toFixed(1)} L`, sub: 'Liters collected today', icon: Droplets, color: '#FF6B00', bg: '#FFF3E8' },
     { title: 'Total Farmers', value: totalFarmers.toString(), sub: 'Registered active farmers', icon: Users, color: '#22C55E', bg: '#DCFCE7' },
     { title: 'Revenue Today', value: `₹${todayRevenue.toFixed(0)}`, sub: 'Total payout today', icon: TrendingUp, color: '#3B82F6', bg: '#DBEAFE' },
     { title: 'Total Outstanding', value: `₹${totalOutstanding.toFixed(0)}`, sub: 'Net outstanding balance', icon: Wallet, color: '#FF6B00', bg: '#FFF3E8' },
