@@ -192,7 +192,7 @@ class DoodhOSOfflineDB extends Dexie {
 
   constructor() {
     super('DoodhOSOfflineDB');
-    this.version(7).stores({
+    this.version(8).stores({
       collections: 'id, farmerId, centerId, pendingSync, isDeleted, localUpdatedAt',
       farmers: 'id, name, centerId, localUpdatedAt',
       rateCharts: 'id, animal, status, centerId, localUpdatedAt',
