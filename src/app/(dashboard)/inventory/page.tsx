@@ -72,11 +72,9 @@ export default function InventoryDashboard() {
       for (const item of itemsData) {
         const variants = await inventoryService.getVariants(centerId, item.id);
         
-        let itemStock = 0;
-        variants.forEach(v => {
-          itemStock += v.currentStock || 0;
-          stockValue += (v.currentStock || 0) * (v.purchasePrice || 0);
-        });
+        const itemStock = item.stockInBaseUnit || 0;
+        const defaultPrice = (variants[0]?.purchasePrice / (variants[0]?.packageSize || 1)) || 0;
+        stockValue += itemStock * defaultPrice;
 
         // Track Category distribution
         catMap[item.category] = (catMap[item.category] || 0) + itemStock;
@@ -90,9 +88,9 @@ export default function InventoryDashboard() {
             id: item.id,
             name: item.name,
             sku: item.sku,
-            currentStock: itemStock,
+            stockInBaseUnit: itemStock,
             minStock: item.minimumStock,
-            unit: item.unit
+            unit: item.baseUnit
           });
         }
       }
@@ -355,7 +353,7 @@ export default function InventoryDashboard() {
                     <tr key={item.id} className="border-b border-[#F7F7F7] last:border-none">
                       <td className="py-2.5 font-bold text-[#111111]">{item.name}</td>
                       <td className="py-2.5 text-[#777777] font-mono text-[11px]">{item.sku}</td>
-                      <td className="py-2.5 text-right font-extrabold text-red-500">{item.currentStock} {item.unit}</td>
+                      <td className="py-2.5 text-right font-extrabold text-red-500">{item.stockInBaseUnit} {item.unit}</td>
                       <td className="py-2.5 text-right text-[#555]">{item.minStock} {item.unit}</td>
                       <td className="py-2.5 text-center">
                         <span className="text-[9px] font-extrabold bg-orange-50 text-orange-600 border border-orange-200 px-2 py-0.5 rounded-lg uppercase">

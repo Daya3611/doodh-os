@@ -69,11 +69,12 @@ export const salesService = {
       const localItem = await offlineDb.inventoryItems.get(item.itemId);
       if (!v) throw new Error(`Variant not found for item ${item.itemName}`);
       
-      const conversionQty = v.conversionQty || 1;
-      const convertedQty = item.quantity * conversionQty;
+      const packageSize = v.packageSize || item.packageSizeSnapshot || 1;
+      const convertedQty = item.quantity * packageSize;
+      const availableStock = localItem?.stockInBaseUnit || 0;
       
-      if (!enableNegativeStock && localItem && localItem.currentStock < convertedQty) {
-        throw new Error(`Insufficient stock for ${item.itemName}. Available: ${localItem.currentStock} ${localItem.unit}, Requested: ${convertedQty} ${localItem.unit}`);
+      if (!enableNegativeStock && localItem && availableStock < convertedQty) {
+        throw new Error(`Insufficient stock for ${item.itemName}. Available: ${availableStock} ${localItem.baseUnit}, Requested: ${convertedQty} ${localItem.baseUnit}`);
       }
     }
 
@@ -93,15 +94,15 @@ export const salesService = {
     for (const item of data.items) {
       if (itemStocks[item.itemId] === undefined) {
         const localItem = await offlineDb.inventoryItems.get(item.itemId);
-        itemStocks[item.itemId] = localItem?.currentStock || 0;
+        itemStocks[item.itemId] = localItem?.stockInBaseUnit || 0;
       }
       const localVariant = await offlineDb.inventoryVariants.get(item.variantId);
-      const conversionQty = localVariant?.conversionQty || 1;
-      const convertedQty = item.quantity * conversionQty;
+      const packageSize = localVariant?.packageSize || item.packageSizeSnapshot || 1;
+      const convertedQty = item.quantity * packageSize;
       itemStocks[item.itemId] -= convertedQty;
     }
 
-    const stockUpdates: Array<{itemId: string, variantId: string, newVariantStock: number, newItemStock: number, prevVariantStock: number, prevItemStock: number}> = [];
+    const stockUpdates: Array<{ itemId: string, newItemStock: number, prevItemStock: number }> = [];
     const auditLogs: any[] = [];
 
     for (const item of data.items) {
@@ -109,36 +110,19 @@ export const salesService = {
       const localItem = await offlineDb.inventoryItems.get(item.itemId);
 
       if (localVariant && localItem) {
-        const prevVariantStock = localVariant.currentStock || 0;
-        const prevItemStock = localItem.currentStock || 0;
-
-        const conversionQty = localVariant.conversionQty || 1;
-        const convertedQty = item.quantity * conversionQty;
-
+        const prevItemStock = localItem.stockInBaseUnit || 0;
+        const packageSize = localVariant.packageSize || item.packageSizeSnapshot || 1;
+        const convertedQty = item.quantity * packageSize;
         const finalItemStock = itemStocks[item.itemId];
-        const newVariantStock = finalItemStock / conversionQty;
 
-        // Update all variants of the parent item to their equivalent stock
-        const allVariants = await offlineDb.inventoryVariants.where('itemId').equals(item.itemId).toArray();
-        for (const v of allVariants) {
-          const vConversion = v.conversionQty || 1;
-          const vNewStock = finalItemStock / vConversion;
+        stockUpdates.push({
+          itemId: item.itemId,
+          newItemStock: finalItemStock,
+          prevItemStock
+        });
 
-          const dupIdx = stockUpdates.findIndex(su => su.variantId === v.id);
-          if (dupIdx > -1) {
-            stockUpdates[dupIdx].newVariantStock = vNewStock;
-            stockUpdates[dupIdx].newItemStock = finalItemStock;
-          } else {
-            stockUpdates.push({
-              itemId: item.itemId,
-              variantId: v.id,
-              newVariantStock: vNewStock,
-              newItemStock: finalItemStock,
-              prevVariantStock,
-              prevItemStock
-            });
-          }
-        }
+        // Store package size snapshot to transaction item
+        item.packageSizeSnapshot = packageSize;
 
         auditLogs.push({
           id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -146,12 +130,12 @@ export const salesService = {
           itemName: item.itemName,
           variantId: item.variantId,
           variantName: item.variantName,
-          prevStock: prevVariantStock,
-          newStock: newVariantStock,
-          quantity: -item.quantity,
+          prevStock: prevItemStock,
+          newStock: finalItemStock,
+          quantity: -convertedQty, // Base unit quantity logged
           actionType: 'sale',
           referenceId: salesId,
-          reason: `Sale Invoice ${invoiceNumber} (${item.quantity} ${item.variantName} = ${convertedQty} ${localItem?.unit || 'KG'})`,
+          reason: `Sale Invoice ${invoiceNumber} (${item.quantity} ${item.variantName} = ${convertedQty} ${localItem?.baseUnit || 'KG'})`,
           createdBy,
           createdAt: new Date(),
           centerId
@@ -214,10 +198,7 @@ export const salesService = {
         // Update Stock levels in Firestore
         for (const update of stockUpdates) {
           const itemDocRef = doc(db, 'centers', centerId, 'inventory_items', update.itemId);
-          await setDoc(itemDocRef, { currentStock: update.newItemStock, stock: update.newItemStock }, { merge: true });
-
-          const varDocRef = doc(db, 'centers', centerId, 'inventory_variants', update.variantId);
-          await setDoc(varDocRef, { currentStock: update.newVariantStock }, { merge: true });
+          await setDoc(itemDocRef, { stockInBaseUnit: update.newItemStock }, { merge: true });
         }
 
         // Write Audit Logs in Firestore
@@ -266,8 +247,7 @@ export const salesService = {
         }
 
         for (const update of stockUpdates) {
-          await offlineDb.inventoryVariants.update(update.variantId, { currentStock: update.newVariantStock });
-          await offlineDb.inventoryItems.update(update.itemId, { currentStock: update.newItemStock, stock: update.newItemStock });
+          await offlineDb.inventoryItems.update(update.itemId, { stockInBaseUnit: update.newItemStock });
         }
 
         for (const log of auditLogs) {
@@ -315,8 +295,7 @@ export const salesService = {
     }
 
     for (const update of stockUpdates) {
-      await offlineDb.inventoryVariants.update(update.variantId, { currentStock: update.newVariantStock });
-      await offlineDb.inventoryItems.update(update.itemId, { currentStock: update.newItemStock, stock: update.newItemStock });
+      await offlineDb.inventoryItems.update(update.itemId, { stockInBaseUnit: update.newItemStock });
     }
 
     for (const log of auditLogs) {

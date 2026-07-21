@@ -8,6 +8,7 @@ import { farmerService } from '@/services/farmerService';
 import { ledgerService } from '@/services/ledgerService';
 import { purchaseService } from '@/services/purchaseService';
 import { inventoryService } from '@/services/inventoryService';
+import { offlineDb } from '@/lib/offlineDb';
 import { Collection, Farmer, LedgerEntry, Purchase, InventoryItem, Payment } from '@/types';
 import { calculateFarmerBalance } from '@/lib/balance';
 import { toast } from 'sonner';
@@ -73,13 +74,27 @@ export default function ReportsPage() {
         purchaseService.getAll(centerId),
         inventoryService.getAll(centerId)
       ]);
+      const allVars = await offlineDb.inventoryVariants.toArray();
+      const mappedInventory = invData.map(item => {
+        const itemVars = allVars.filter(v => v.itemId === item.id);
+        const defaultVar = itemVars.find(v => v.isDefault) || itemVars[0];
+        const packageSize = defaultVar?.packageSize || 1;
+        const sellingPrice = defaultVar?.sellingPrice || 0;
+        const pricePerBaseUnit = sellingPrice / packageSize;
+        return {
+          ...item,
+          price: pricePerBaseUnit,
+          stock: item.stockInBaseUnit || 0
+        };
+      });
       setCollections(colData);
       setFarmers(farData);
       setPayments(pmtData);
       setLedgers(ldgData);
       setPurchases(purData as any);
-      setInventory(invData);
-    } catch {
+      setInventory(mappedInventory as any);
+    } catch (err) {
+      console.error(err);
       toast.error('Failed to load report data');
     } finally {
       setIsLoading(false);
@@ -506,7 +521,7 @@ export default function ReportsPage() {
           <div className="flex justify-between items-center bg-[#F7F7F7] p-4 rounded-xl border border-[#ECECEC]">
             <div className="flex gap-6">
               <div><div className="text-[10px] text-[#777] uppercase tracking-wider mb-1">Total Items</div><div className="text-[18px] font-bold text-[#111]">{inventory.length}</div></div>
-              <div><div className="text-[10px] text-[#777] uppercase tracking-wider mb-1">Total Stock Val</div><div className="text-[18px] font-bold text-green-600">₹{inventory.reduce((s, i) => s + (i.stock * i.price), 0).toFixed(2)}</div></div>
+              <div><div className="text-[10px] text-[#777] uppercase tracking-wider mb-1">Total Stock Val</div><div className="text-[18px] font-bold text-green-600">₹{inventory.reduce((s, i) => s + ((i.stockInBaseUnit || 0) * 0), 0).toFixed(2)}</div></div>
             </div>
             <button onClick={doExport} className="flex items-center gap-2 px-4 py-2 bg-[#111] text-white text-[12px] font-bold rounded-lg hover:bg-gray-800"><FileDown size={14} /> Export Excel</button>
           </div>
@@ -526,9 +541,9 @@ export default function ReportsPage() {
                   <TableRow key={i.id}>
                     <TableCell className="text-[12px] font-medium">{i.name}</TableCell>
                     <TableCell className="text-[12px]">{i.category}</TableCell>
-                    <TableCell className="text-[12px] text-right font-bold text-[#111]">{i.stock}</TableCell>
-                    <TableCell className="text-[12px] text-right">{i.unit}</TableCell>
-                    <TableCell className="text-[12px] text-right font-bold text-[#FF6B00]">₹{i.price}</TableCell>
+                    <TableCell className="text-[12px] text-right font-bold text-[#111]">{i.stockInBaseUnit ?? 0}</TableCell>
+                    <TableCell className="text-[12px] text-right">{i.baseUnit}</TableCell>
+                    <TableCell className="text-[12px] text-right font-bold text-[#FF6B00]">-</TableCell>
                   </TableRow>
                 ))}
                 {inventory.length === 0 && (

@@ -77,9 +77,10 @@ export default function StockAdjustmentsPage() {
     
     try {
       const vars = await inventoryService.getVariants(centerId!, item.id);
-      setItemVariants(vars);
-      if (vars.length > 0) {
-        setSelectedVariantId(vars[0].id);
+      const activeVars = vars.filter(v => v.isActive !== false);
+      setItemVariants(activeVars);
+      if (activeVars.length > 0) {
+        setSelectedVariantId(activeVars[0].id);
       }
     } catch {
       toast.error('Failed to load item variants');
@@ -106,8 +107,11 @@ export default function StockAdjustmentsPage() {
     if (!variant) return;
 
     // Enforce sufficient stock on deduction
-    if (adjustType === 'deduction' && (variant.currentStock || 0) < rawQty) {
-      toast.error(`Cannot deduct more than available. Available: ${variant.currentStock} ${variant.unit}`);
+    const packageSize = variant.packageSize || 1;
+    const requestedBaseQty = rawQty * packageSize;
+    const availableStock = selectedItem.stockInBaseUnit || 0;
+    if (adjustType === 'deduction' && availableStock < requestedBaseQty) {
+      toast.error(`Cannot deduct more than available. Available: ${Math.floor(availableStock / packageSize)} ${variant.name}`);
       return;
     }
 
@@ -117,6 +121,7 @@ export default function StockAdjustmentsPage() {
       variantId: selectedVariantId,
       variantName: variant.name,
       quantity: netQuantity,
+      packageSizeSnapshot: packageSize,
       reason,
       notes,
     };
@@ -194,7 +199,7 @@ export default function StockAdjustmentsPage() {
               >
                 <option value="">-- Choose Variant --</option>
                 {itemVariants.map(v => (
-                  <option key={v.id} value={v.id}>{v.name} (Available: {v.currentStock} {v.unit})</option>
+                  <option key={v.id} value={v.id}>{v.name} (Available: {Math.floor(((selectedItem?.stockInBaseUnit) || 0) / (v.packageSize || 1))} {v.name})</option>
                 ))}
               </select>
             </div>

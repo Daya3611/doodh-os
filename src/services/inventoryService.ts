@@ -15,16 +15,25 @@ const DEFAULT_UNITS = ['Piece', 'KG', 'Gram', 'Litre', 'ML', 'Bag', 'Packet', 'B
 /** Ensures all numeric fields on a variant are proper numbers, never undefined.
  *  Also defaults purchaseAllowed/sellingAllowed to true for old records that lack these fields.
  */
-function normalizeVariant(v: InventoryVariant): InventoryVariant {
+function normalizeVariant(v: any): InventoryVariant {
+  const purchasePrice = toSafeNumber(v.purchasePrice !== undefined ? v.purchasePrice : v.purchasePricePerVariant);
+  const sellingPrice = toSafeNumber(v.sellingPrice !== undefined ? v.sellingPrice : v.sellingPricePerVariant);
+  
+  const packageSize = toSafeNumber(v.packageSize || v.conversionValue || v.conversionQty) || 1;
+  const name = v.name || v.variantName || v.conversionUnit || v.unit || 'Loose';
+
   return {
-    ...v,
-    purchasePrice: toSafeNumber(v.purchasePrice),
-    sellingPrice: toSafeNumber(v.sellingPrice),
-    currentStock: toSafeNumber(v.currentStock),
-    conversionQty: toSafeNumber(v.conversionQty) || 1,
-    // Backward-compat: old records don't have these fields — treat them as allowed
-    purchaseAllowed: (v as any).purchaseAllowed !== false,
-    sellingAllowed: (v as any).sellingAllowed !== false,
+    id: v.id,
+    itemId: v.itemId,
+    name,
+    packageSize,
+    purchasePrice,
+    sellingPrice,
+    barcode: v.barcode || '',
+    sku: v.sku || '',
+    isDefault: v.isDefault === true || v.purchaseAllowed !== false,
+    isActive: v.isActive !== false && v.status !== 'inactive',
+    createdAt: v.createdAt || new Date()
   };
 }
 
@@ -47,11 +56,12 @@ export const inventoryService = {
         const snap = await getDocs(query(inventoryService.getCollectionRef(centerId), orderBy('name', 'asc')));
         const cloudItems = snap.docs.map(d => {
           const data = d.data();
+          const stockInBaseUnit = data.stockInBaseUnit !== undefined ? data.stockInBaseUnit : (data.currentStock || data.stock || 0);
+          const { currentStock, stock, price, defaultPurchasePrice, defaultSellingPrice, ...rest } = data;
           return {
             id: d.id,
-            ...data,
-            price: data.defaultSellingPrice || 0,
-            stock: data.currentStock || 0,
+            ...rest,
+            stockInBaseUnit
           } as InventoryItem;
         });
 
@@ -77,11 +87,13 @@ export const inventoryService = {
       .where('centerId').equals(centerId)
       .and(i => i.isDeleted !== 1)
       .toArray();
-    return local.map(i => ({
-      ...i,
-      price: i.defaultSellingPrice || 0,
-      stock: i.currentStock || 0,
-    })).sort((a, b) => a.name.localeCompare(b.name));
+    return local.map(i => {
+      const stockInBaseUnit = i.stockInBaseUnit !== undefined ? i.stockInBaseUnit : ((i as any).currentStock || (i as any).stock || 0);
+      return {
+        ...i,
+        stockInBaseUnit
+      } as InventoryItem;
+    }).sort((a, b) => a.name.localeCompare(b.name));
   },
 
   add: async (centerId: string, data: InventoryItemFormData): Promise<string> => {
@@ -90,9 +102,7 @@ export const inventoryService = {
 
     const itemData = {
       ...data,
-      currentStock: data.currentStock || 0,
-      price: data.defaultSellingPrice || 0,
-      stock: data.currentStock || 0,
+      stockInBaseUnit: data.stockInBaseUnit || 0
     };
 
     if (isOnline) {
@@ -119,18 +129,14 @@ export const inventoryService = {
         await inventoryService.addVariant(centerId, {
           id: `var-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
           itemId,
-          name: `Standard (${data.unit})`,
-          purchasePrice: data.defaultPurchasePrice || 0,
-          sellingPrice: data.defaultSellingPrice || 0,
-          currentStock: data.currentStock || 0,
+          name: 'Loose',
+          purchasePrice: 0,
+          sellingPrice: 0,
           barcode: data.barcode || '',
           sku: data.sku,
-          unit: data.unit,
-          conversionQty: 1,
-          baseUnit: data.unit,
-          purchaseAllowed: true,
-          sellingAllowed: true,
-          status: 'active'
+          packageSize: 1,
+          isDefault: true,
+          isActive: true
         });
 
         return itemId;
@@ -154,18 +160,14 @@ export const inventoryService = {
     await inventoryService.addVariant(centerId, {
       id: `var-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
       itemId,
-      name: `Standard (${data.unit})`,
-      purchasePrice: data.defaultPurchasePrice || 0,
-      sellingPrice: data.defaultSellingPrice || 0,
-      currentStock: data.currentStock || 0,
+      name: 'Loose',
+      purchasePrice: 0,
+      sellingPrice: 0,
       barcode: data.barcode || '',
       sku: data.sku,
-      unit: data.unit,
-      conversionQty: 1,
-      baseUnit: data.unit,
-      purchaseAllowed: true,
-      sellingAllowed: true,
-      status: 'active'
+      packageSize: 1,
+      isDefault: true,
+      isActive: true
     });
 
     return itemId;
@@ -180,8 +182,6 @@ export const inventoryService = {
     const updatedLocal = {
       ...local,
       ...data,
-      price: data.defaultSellingPrice !== undefined ? data.defaultSellingPrice : local.price,
-      stock: data.currentStock !== undefined ? data.currentStock : local.stock,
       updatedAt: new Date(),
       localUpdatedAt: Date.now()
     };
@@ -218,7 +218,7 @@ export const inventoryService = {
       try {
         await deleteDoc(doc(inventoryService.getCollectionRef(centerId), itemId));
         await offlineDb.inventoryItems.delete(itemId);
-        
+
         // Also delete associated variants
         const vars = await offlineDb.inventoryVariants.where('itemId').equals(itemId).toArray();
         for (const v of vars) {
@@ -393,28 +393,22 @@ export const inventoryService = {
     const isOnline = typeof window !== 'undefined' && navigator.onLine;
     const adjId = `adj-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-    const adjustmentData = {
-      ...data,
-      id: adjId,
-      createdBy,
-      createdAt: new Date(),
-    };
-
     // Calculate new stocks
     const localVariant = await offlineDb.inventoryVariants.get(data.variantId);
     const localItem = await offlineDb.inventoryItems.get(data.itemId);
 
-    const prevVariantStock = localVariant?.currentStock || 0;
-    const prevItemStock = localItem?.currentStock || 0;
-
-    const conversionQty = localVariant?.conversionQty || 1;
-    const convertedQty = data.quantity * conversionQty;
-
+    const prevItemStock = localItem?.stockInBaseUnit || 0;
+    const packageSize = localVariant?.packageSize || 1;
+    const convertedQty = data.quantity * packageSize;
     const newItemStock = prevItemStock + convertedQty;
-    const newVariantStock = newItemStock / conversionQty;
 
-    // Load all variants belonging to the parent item to update their equivalent stock
-    const allVariants = await offlineDb.inventoryVariants.where('itemId').equals(data.itemId).toArray();
+    const adjustmentData = {
+      ...data,
+      packageSizeSnapshot: packageSize,
+      id: adjId,
+      createdBy,
+      createdAt: new Date(),
+    };
 
     const auditLog = {
       id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -422,12 +416,12 @@ export const inventoryService = {
       itemName: data.itemName,
       variantId: data.variantId,
       variantName: data.variantName,
-      prevStock: prevVariantStock,
-      newStock: newVariantStock,
-      quantity: data.quantity,
+      prevStock: prevItemStock,
+      newStock: newItemStock,
+      quantity: convertedQty, // Base quantity logged
       actionType: 'adjustment' as const,
       referenceId: adjId,
-      reason: `Stock Adjustment: ${data.reason.replace('_', ' ')}. ${data.notes || ''} (${data.quantity} ${data.variantName} = ${convertedQty} ${localItem?.unit || 'KG'})`,
+      reason: `Stock Adjustment: ${data.reason.replace('_', ' ')}. ${data.notes || ''} (${data.quantity} ${data.variantName} = ${convertedQty} ${localItem?.baseUnit || 'KG'})`,
       createdBy,
       createdAt: new Date(),
       centerId
@@ -442,14 +436,7 @@ export const inventoryService = {
         });
 
         // Update parent item stock online
-        await setDoc(doc(db, 'centers', centerId, 'inventory_items', data.itemId), { currentStock: newItemStock, stock: newItemStock }, { merge: true });
-        
-        // Update all variant stocks online
-        for (const v of allVariants) {
-          const vConversion = v.conversionQty || 1;
-          const vNewStock = newItemStock / vConversion;
-          await setDoc(doc(db, 'centers', centerId, 'inventory_variants', v.id), { currentStock: vNewStock }, { merge: true });
-        }
+        await setDoc(doc(db, 'centers', centerId, 'inventory_items', data.itemId), { stockInBaseUnit: newItemStock }, { merge: true });
 
         // Add audit log online
         const logRef = doc(inventoryService.getLogCollectionRef(centerId), auditLog.id);
@@ -468,13 +455,8 @@ export const inventoryService = {
           localUpdatedAt: Date.now()
         });
 
-        await offlineDb.inventoryItems.update(data.itemId, { currentStock: newItemStock, stock: newItemStock });
-        for (const v of allVariants) {
-          const vConversion = v.conversionQty || 1;
-          const vNewStock = newItemStock / vConversion;
-          await offlineDb.inventoryVariants.update(v.id, { currentStock: vNewStock });
-        }
-        
+        await offlineDb.inventoryItems.update(data.itemId, { stockInBaseUnit: newItemStock });
+
         await offlineDb.inventoryLogs.put({
           ...auditLog,
           pendingSync: 0,
@@ -496,12 +478,7 @@ export const inventoryService = {
       localUpdatedAt: Date.now()
     });
 
-    await offlineDb.inventoryItems.update(data.itemId, { currentStock: newItemStock, stock: newItemStock });
-    for (const v of allVariants) {
-      const vConversion = v.conversionQty || 1;
-      const vNewStock = newItemStock / vConversion;
-      await offlineDb.inventoryVariants.update(v.id, { currentStock: vNewStock });
-    }
+    await offlineDb.inventoryItems.update(data.itemId, { stockInBaseUnit: newItemStock });
 
     await offlineDb.inventoryLogs.put({
       ...auditLog,
@@ -510,6 +487,58 @@ export const inventoryService = {
     });
 
     return adjId;
+  },
+
+  /**
+   * Returns true if any purchase, sale, or stock adjustment has ever used this variant.
+   * Used to lock the packageSize field on the edit variant form — changing it retroactively
+   * would corrupt the base-unit conversion on all historical transactions.
+   */
+  variantHasTransactions: async (centerId: string, variantId: string): Promise<boolean> => {
+    // Check IndexedDB (offline-first; these tables have variantId indexed)
+    const purchaseCount = await offlineDb.purchaseItems
+      .where('variantId').equals(variantId)
+      .and(p => p.centerId === centerId)
+      .count();
+    if (purchaseCount > 0) return true;
+
+    const salesCount = await offlineDb.salesItems
+      .where('variantId').equals(variantId)
+      .and(s => s.centerId === centerId)
+      .count();
+    if (salesCount > 0) return true;
+
+    const adjCount = await offlineDb.stockAdjustments
+      .where('variantId').equals(variantId)
+      .and(a => a.centerId === centerId && a.isDeleted !== 1)
+      .count();
+    return adjCount > 0;
+  },
+
+  /**
+   * Promotes one variant to isDefault = true and demotes all sibling variants.
+   * Writes to both Firestore (when online) and IndexedDB.
+   */
+  setDefaultVariant: async (centerId: string, variantId: string, itemId: string): Promise<void> => {
+    const isOnline = typeof window !== 'undefined' && navigator.onLine;
+    const siblings = await offlineDb.inventoryVariants.where('itemId').equals(itemId).toArray();
+
+    for (const v of siblings) {
+      const shouldBeDefault = v.id === variantId;
+      if (v.isDefault === shouldBeDefault) continue; // already correct, skip write
+
+      const updated = { ...v, isDefault: shouldBeDefault, localUpdatedAt: Date.now() };
+      await offlineDb.inventoryVariants.put(updated);
+
+      if (isOnline) {
+        try {
+          const ref = doc(inventoryService.getVariantCollectionRef(centerId), v.id);
+          await setDoc(ref, { isDefault: shouldBeDefault }, { merge: true });
+        } catch (err) {
+          console.warn(`Failed to sync isDefault for variant ${v.id}:`, err);
+        }
+      }
+    }
   },
 
   getAdjustments: async (centerId: string): Promise<StockAdjustment[]> => {
@@ -591,7 +620,7 @@ export const inventoryService = {
         if (snap.exists()) {
           const cloudSettings = snap.data() as any;
           const merged = { ...defaultData, ...cloudSettings };
-          
+
           await offlineDb.inventorySettings.put({
             ...merged,
             centerId,
@@ -646,5 +675,88 @@ export const inventoryService = {
       centerId,
       localUpdatedAt: Date.now()
     });
+  },
+
+  migrateVariantStocks: async (centerId: string) => {
+    // 1. Back up current inventory items and variants to localStorage
+    try {
+      const allItems = await offlineDb.inventoryItems.where('centerId').equals(centerId).toArray();
+      const allVars = await offlineDb.inventoryVariants.toArray();
+      localStorage.setItem('doodhos_inventory_backup_v1', JSON.stringify({ items: allItems, variants: allVars }));
+      console.log("Backup of V1 inventory completed successfully in localStorage.");
+    } catch (e) {
+      console.error("Failed to create backup in localStorage:", e);
+    }
+
+    // 2. Consolidate stock and normalize variant schema
+    const items = await offlineDb.inventoryItems.where('centerId').equals(centerId).toArray();
+    for (const item of items) {
+      const variants = await offlineDb.inventoryVariants.where('itemId').equals(item.id).toArray();
+      let totalStockInBaseUnit = 0;
+
+      for (const v of variants) {
+        const stock = (v as any).currentStock || (v as any).stock || 0;
+        if (stock > 0) {
+          const packageSize = v.packageSize || (v as any).conversionValue || (v as any).conversionQty || 1;
+          totalStockInBaseUnit += (stock * packageSize);
+        }
+      }
+
+      const prevStock = item.stockInBaseUnit !== undefined ? item.stockInBaseUnit : ((item as any).currentStock || (item as any).stock || 0);
+      const newTotalStock = prevStock + totalStockInBaseUnit;
+
+      // Update parent item stock and clean up old fields
+      const updatedItem: any = {
+        ...item,
+        stockInBaseUnit: newTotalStock
+      };
+      delete updatedItem.currentStock;
+      delete updatedItem.stock;
+      delete updatedItem.price;
+      delete updatedItem.defaultPurchasePrice;
+      delete updatedItem.defaultSellingPrice;
+
+      await offlineDb.inventoryItems.put(updatedItem);
+
+      if (typeof window !== 'undefined' && navigator.onLine) {
+        try {
+          const itemRef = doc(db, 'centers', centerId, 'inventory_items', item.id);
+          // Overwrite Firestore document
+          await setDoc(itemRef, updatedItem);
+        } catch (e) {
+          console.error("Failed to sync migrated stock for item", item.id, e);
+        }
+      }
+
+      // Migrate variants schema
+      for (const v of variants) {
+        const normalized = normalizeVariant(v);
+        const updatedVar: any = {
+          ...normalized
+        };
+        delete updatedVar.conversionValue;
+        delete updatedVar.conversionUnit;
+        delete updatedVar.conversionQty;
+        delete updatedVar.status;
+        delete updatedVar.purchaseAllowed;
+        delete updatedVar.sellingAllowed;
+        delete updatedVar.purchasePricePerBaseUnit;
+        delete updatedVar.sellingPricePerBaseUnit;
+        delete updatedVar.unit;
+        delete updatedVar.baseUnit;
+
+        await offlineDb.inventoryVariants.put(updatedVar);
+
+        if (typeof window !== 'undefined' && navigator.onLine) {
+          try {
+            const varRef = doc(db, 'centers', centerId, 'inventory_variants', v.id);
+            await setDoc(varRef, updatedVar);
+          } catch (e) {
+            console.error("Failed to sync migrated variant", v.id, e);
+          }
+        }
+      }
+    }
+    console.log("Migration to V2 inventory schema completed successfully.");
   }
 };

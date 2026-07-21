@@ -73,12 +73,14 @@ export default function ReportsPage() {
             itemName: item.name,
             itemCategory: item.category,
             itemBrand: item.brand,
-            itemUnit: item.unit
+            itemUnit: item.baseUnit,
+            parentStock: item.stockInBaseUnit || 0
           });
         });
       }
       setFlatVariants(tempVariants);
-    } catch {
+    } catch (err) {
+      console.error(err);
       toast.error('Failed to load reports datasets');
     } finally {
       setIsLoading(false);
@@ -147,41 +149,59 @@ export default function ReportsPage() {
     switch (reportType) {
       case 'current-stock':
         title = 'Current Stock Levels';
-        columns = ['Item Name', 'Category', 'Brand', 'SKU', 'Available Stock', 'Unit', 'Alert Limit'];
+        columns = ['Item Name', 'Category', 'Brand', 'SKU', 'Stock (Base Unit)', 'Unit', 'Equivalents', 'Alert Limit'];
         rows = items
           .filter(item => item.name.toLowerCase().includes(searchLower) || item.sku.toLowerCase().includes(searchLower))
-          .map(item => ({
-            'Item Name': item.name,
-            'Category': item.category,
-            'Brand': item.brand,
-            'SKU': item.sku,
-            'Available Stock': item.currentStock,
-            'Unit': item.unit,
-            'Alert Limit': item.minimumStock
-          }));
+          .map(item => {
+            const stockBase = item.stockInBaseUnit || 0;
+            // Build equivalents string: "10 Bags, 20 Small Bags"
+            const itemVars = flatVariants.filter(fv => fv.itemId === item.id);
+            const equivalents = itemVars
+              .map(v => `${Math.floor(stockBase / (v.packageSize || 1))} ${v.name}`)
+              .join(', ');
+            return {
+              'Item Name': item.name,
+              'Category': item.category,
+              'Brand': item.brand,
+              'SKU': item.sku,
+              'Stock (Base Unit)': stockBase,
+              'Unit': item.baseUnit,
+              'Equivalents': equivalents || '-',
+              'Alert Limit': item.minimumStock
+            };
+          });
         totals['Total Items'] = rows.length;
-        totals['Total Physical Qty'] = rows.reduce((sum, r) => sum + r['Available Stock'], 0);
+        totals['Total Physical Qty'] = rows.reduce((sum, r) => sum + (r['Stock (Base Unit)'] || 0), 0);
         break;
 
       case 'stock-value':
         title = 'Stock Valuation Statement';
-        columns = ['Variant Name', 'Item Name', 'SKU', 'Purchase Price', 'Selling Price', 'On Hand Stock', 'Valuation Cost'];
-        rows = flatVariants
-          .filter(v => v.itemName.toLowerCase().includes(searchLower) || v.sku.toLowerCase().includes(searchLower))
-          .map(v => {
-            const cost = (v.currentStock || 0) * (v.purchasePrice || 0);
+        columns = ['Item Name', 'Category', 'Brand', 'SKU', 'Purchase Price', 'Selling Price', 'On Hand Stock', 'Valuation Cost'];
+        rows = items
+          .filter(item => item.name.toLowerCase().includes(searchLower) || item.sku.toLowerCase().includes(searchLower))
+          .map(item => {
+            const defaultVar = flatVariants.find(fv => fv.itemId === item.id && fv.isDefault) || flatVariants.find(fv => fv.itemId === item.id);
+            const purchasePrice = defaultVar ? defaultVar.purchasePrice : 0;
+            const packageSize = defaultVar ? defaultVar.packageSize : 1;
+            const pricePerBaseUnit = purchasePrice / packageSize;
+            
+            const sellingPrice = defaultVar ? defaultVar.sellingPrice : 0;
+            const sellingPricePerBaseUnit = sellingPrice / packageSize;
+
+            const cost = (item.stockInBaseUnit || 0) * pricePerBaseUnit;
             return {
-              'Variant Name': v.name,
-              'Item Name': v.itemName,
-              'SKU': v.sku,
-              'Purchase Price': v.purchasePrice,
-              'Selling Price': v.sellingPrice,
-              'On Hand Stock': v.currentStock,
+              'Item Name': item.name,
+              'Category': item.category,
+              'Brand': item.brand,
+              'SKU': item.sku,
+              'Purchase Price': Number(pricePerBaseUnit).toFixed(2),
+              'Selling Price': Number(sellingPricePerBaseUnit).toFixed(2),
+              'On Hand Stock': `${item.stockInBaseUnit || 0} ${item.baseUnit || 'KG'}`,
               'Valuation Cost': cost
             };
           });
         totals['Total Valuation (Cost)'] = rows.reduce((sum, r) => sum + r['Valuation Cost'], 0);
-        totals['Total Units'] = rows.reduce((sum, r) => sum + r['On Hand Stock'], 0);
+        totals['Total Units'] = items.reduce((sum, item) => sum + (item.stockInBaseUnit || 0), 0);
         break;
 
       case 'purchase-report':
@@ -268,14 +288,14 @@ export default function ReportsPage() {
         title = 'Low Stock Alert Log';
         columns = ['Item Name', 'SKU', 'Category', 'Brand', 'On Hand Stock', 'Unit', 'Alert Threshold'];
         rows = items
-          .filter(item => item.currentStock <= item.minimumStock && (item.name.toLowerCase().includes(searchLower) || item.sku.toLowerCase().includes(searchLower)))
+          .filter(item => item.stockInBaseUnit <= item.minimumStock && (item.name.toLowerCase().includes(searchLower) || item.sku.toLowerCase().includes(searchLower)))
           .map(item => ({
             'Item Name': item.name,
             'SKU': item.sku,
             'Category': item.category,
             'Brand': item.brand,
-            'On Hand Stock': item.currentStock,
-            'Unit': item.unit,
+            'On Hand Stock': item.stockInBaseUnit,
+            'Unit': item.baseUnit,
             'Alert Threshold': item.minimumStock
           }));
         totals['Alerting Products Count'] = rows.length;
@@ -324,14 +344,21 @@ export default function ReportsPage() {
             catSummary[item.category] = { count: 0, stock: 0, value: 0 };
           }
           catSummary[item.category].count += 1;
-          catSummary[item.category].stock += item.currentStock || 0;
+          catSummary[item.category].stock += item.stockInBaseUnit || 0;
         });
 
-        // Add valuation to categories from variants
-        flatVariants.forEach(v => {
-          if (catSummary[v.itemCategory]) {
-            catSummary[v.itemCategory].value += (v.currentStock || 0) * (v.purchasePrice || 0);
-          }
+        // Compute category stock value using per-item stockInBaseUnit × price-per-base-unit
+        // (using each item's default or first variant to derive the base unit price)
+        // This MUST use items, not flatVariants, to avoid double-counting when an item has multiple variants.
+        items.forEach(item => {
+          if (!catSummary[item.category]) return;
+          const defaultVar =
+            flatVariants.find(fv => fv.itemId === item.id && fv.isDefault) ||
+            flatVariants.find(fv => fv.itemId === item.id);
+          const pricePerBase = defaultVar
+            ? defaultVar.purchasePrice / (defaultVar.packageSize || 1)
+            : 0;
+          catSummary[item.category].value += (item.stockInBaseUnit || 0) * pricePerBase;
         });
 
         Object.keys(catSummary).forEach(cat => {
@@ -366,24 +393,25 @@ export default function ReportsPage() {
         rows = flatVariants
           .filter(v => v.itemName.toLowerCase().includes(searchLower) || v.name.toLowerCase().includes(searchLower))
           .map(v => {
-            const conversionQty = v.conversionQty || 1;
-            const statusLabel = (v.status || 'active').toUpperCase();
+            const packageSize = v.packageSize || 1;
+            const statusLabel = (v.isActive !== false) ? 'ACTIVE' : 'INACTIVE';
+            const parentStock = v.parentStock || 0;
             return {
               'Variant Name': v.name,
               'Parent Product': v.itemName,
               'Category': v.itemCategory,
               'SKU': v.sku,
               'Barcode': v.barcode || '-',
-              'Stock (Variant Unit)': `${Number(v.currentStock || 0).toFixed(2)} ${v.unit}`,
-              'Conversion Ratio': `1 ${v.unit} = ${conversionQty} ${v.itemUnit}`,
-              'Stock (Base Unit)': `${Number((v.currentStock || 0) * conversionQty).toFixed(2)} ${v.itemUnit}`,
+              'Stock (Variant Unit)': `${Number(parentStock / packageSize).toFixed(2)} ${v.name || 'Bag'}`,
+              'Conversion Ratio': `1 ${v.name || 'Bag'} = ${packageSize} ${v.itemUnit}`,
+              'Stock (Base Unit)': `${Number(parentStock).toFixed(2)} ${v.itemUnit}`,
               'Purchase Cost': v.purchasePrice,
               'Selling Value': v.sellingPrice,
               'Status': statusLabel
             };
           });
         totals['Total Unique Variants'] = rows.length;
-        totals['Total Stock (Base Units)'] = flatVariants.reduce((sum, v) => sum + ((v.currentStock || 0) * (v.conversionQty || 1)), 0);
+        totals['Total Stock (Base Units)'] = items.reduce((sum, item) => sum + (item.stockInBaseUnit || 0), 0);
         break;
 
       case 'purchase-variant-report':
@@ -407,10 +435,10 @@ export default function ReportsPage() {
             const d = (p.date as any).toDate ? (p.date as any).toDate() : new Date(p.date as any);
             p.items.forEach(pi => {
               const matchedVar = flatVariants.find(fv => fv.id === pi.variantId);
-              const conversionQty = matchedVar?.conversionQty || 1;
+              const packageSize = pi.packageSizeSnapshot !== undefined ? pi.packageSizeSnapshot : (matchedVar?.packageSize || matchedVar?.conversionValue || 1);
               const baseUnit = matchedVar?.itemUnit || 'KG';
-              const varUnit = matchedVar?.unit || 'Bag';
-              const convertedQty = pi.quantity * conversionQty;
+              const varUnit = pi.variantName || matchedVar?.name || 'Bag';
+              const convertedQty = pi.quantity * packageSize;
 
               rows.push({
                 'Bill No': p.purchaseNumber,
@@ -419,7 +447,7 @@ export default function ReportsPage() {
                 'Product': pi.itemName,
                 'Variant': pi.variantName,
                 'Purchased Qty (Variant Unit)': `${pi.quantity} ${varUnit}`,
-                'Conversion Ratio': `1 ${varUnit} = ${conversionQty} ${baseUnit}`,
+                'Conversion Ratio': `1 ${varUnit} = ${packageSize} ${baseUnit}`,
                 'Converted Qty (Base Unit)': `${convertedQty.toFixed(2)} ${baseUnit}`,
                 'Purchase Price (Pack)': pi.purchaseRate,
                 'Total Cost': pi.total
@@ -451,10 +479,10 @@ export default function ReportsPage() {
             const d = (s.date as any).toDate ? (s.date as any).toDate() : new Date(s.date as any);
             s.items.forEach(si => {
               const matchedVar = flatVariants.find(fv => fv.id === si.variantId);
-              const conversionQty = matchedVar?.conversionQty || 1;
+              const packageSize = si.packageSizeSnapshot !== undefined ? si.packageSizeSnapshot : (matchedVar?.packageSize || matchedVar?.conversionValue || 1);
               const baseUnit = matchedVar?.itemUnit || 'KG';
-              const varUnit = matchedVar?.unit || 'Bag';
-              const convertedQty = si.quantity * conversionQty;
+              const varUnit = si.variantName || matchedVar?.name || 'Bag';
+              const convertedQty = si.quantity * packageSize;
 
               rows.push({
                 'Invoice No': s.invoiceNumber,
@@ -463,7 +491,7 @@ export default function ReportsPage() {
                 'Product': si.itemName,
                 'Variant': si.variantName,
                 'Sold Qty (Variant Unit)': `${si.quantity} ${varUnit}`,
-                'Conversion Ratio': `1 ${varUnit} = ${conversionQty} ${baseUnit}`,
+                'Conversion Ratio': `1 ${varUnit} = ${packageSize} ${baseUnit}`,
                 'Converted Qty (Base Unit)': `${convertedQty.toFixed(2)} ${baseUnit}`,
                 'Selling Price (Pack)': si.sellingPrice,
                 'Total Revenue': si.total

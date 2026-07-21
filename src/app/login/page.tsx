@@ -44,11 +44,19 @@ export default function LoginPage() {
       const userDoc = await getDoc(doc(db, 'users', cred.user.uid));
       const profile = userDoc.exists() ? (userDoc.data() as UserProfile) : null;
 
+      if (profile) {
+        // Set cookies immediately so middleware has them during the redirect
+        document.cookie = `session=true; path=/; max-age=31536000; SameSite=Lax`;
+        document.cookie = `user-role=${profile.role}; path=/; max-age=31536000; SameSite=Lax`;
+      }
+
       toast.success('Welcome back!');
 
       // Role-based redirect
       if (profile?.role === 'STAFF') {
         router.push('/collections/new');
+      } else if (profile?.role === 'MASTER_ADMIN') {
+        router.push('/admin/dashboard');
       } else {
         router.push('/dashboard');
       }
@@ -77,18 +85,11 @@ export default function LoginPage() {
     }
   };
 
-  const inputStyle = {
-    background: '#F7F7F7',
-    border: '1.5px solid #ECECEC',
-    color: '#111111',
-  };
-
   return (
-    <div className="min-h-screen flex" style={{ background: '#F7F7F7' }}>
+    <div className="min-h-screen flex bg-[#F7F7F7]">
       {/* Left Brand Panel */}
       <div
-        className="hidden lg:flex flex-col justify-between w-[420px] p-12 flex-shrink-0"
-        style={{ background: '#FF6B00' }}
+        className="hidden lg:flex flex-col justify-between w-[420px] p-12 flex-shrink-0 bg-[#FF6B00]"
       >
         <div className="flex items-center gap-3">
           <img src="/logo.svg" alt="DoodhOS Logo" className="h-10 w-auto brightness-0 invert" />
@@ -135,11 +136,8 @@ export default function LoginPage() {
               <input
                 {...register('email')}
                 type="email"
-                className="w-full px-4 py-3 text-[14px] rounded-xl outline-none transition-all"
-                style={inputStyle}
+                className="w-full px-4 py-3 text-[14px] rounded-xl outline-none transition-all bg-[#F7F7F7] border border-[#ECECEC] text-[#111111] focus:border-[#FF6B00]"
                 placeholder="owner@doodhos.com"
-                onFocus={e => { e.currentTarget.style.borderColor = '#FF6B00'; }}
-                onBlur={e => { e.currentTarget.style.borderColor = '#ECECEC'; }}
               />
               {errors.email && <p className="text-[11px] text-red-500 mt-1">{errors.email.message}</p>}
             </div>
@@ -148,7 +146,7 @@ export default function LoginPage() {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <label className="text-[12px] font-semibold text-[#777777] uppercase tracking-wider">Password</label>
-                <button type="button" onClick={() => setShowForgot(true)} className="text-[12px] font-medium" style={{ color: '#FF6B00' }}>
+                <button type="button" onClick={() => setShowForgot(true)} className="text-[12px] font-medium text-[#FF6B00]">
                   Forgot password?
                 </button>
               </div>
@@ -156,11 +154,8 @@ export default function LoginPage() {
                 <input
                   {...register('password')}
                   type={showPassword ? 'text' : 'password'}
-                  className="w-full px-4 py-3 pr-12 text-[14px] rounded-xl outline-none transition-all"
-                  style={inputStyle}
+                  className="w-full px-4 py-3 pr-12 text-[14px] rounded-xl outline-none transition-all bg-[#F7F7F7] border border-[#ECECEC] text-[#111111] focus:border-[#FF6B00]"
                   placeholder="••••••••"
-                  onFocus={e => { e.currentTarget.style.borderColor = '#FF6B00'; }}
-                  onBlur={e => { e.currentTarget.style.borderColor = '#ECECEC'; }}
                 />
                 <button
                   type="button"
@@ -185,11 +180,9 @@ export default function LoginPage() {
               whileTap={!isLoading ? { scale: 0.99 } : {}}
               type="submit"
               disabled={isLoading}
-              className="w-full flex items-center justify-center gap-2 py-3.5 text-[15px] font-bold text-white rounded-xl transition-all mt-2"
-              style={{
-                background: isLoading ? '#DDDDDD' : '#FF6B00',
-                boxShadow: !isLoading ? '0 4px 14px rgba(255,107,0,0.35)' : 'none',
-              }}
+              className={`w-full flex items-center justify-center gap-2 py-3.5 text-[15px] font-bold text-white rounded-xl transition-all mt-2 ${
+                isLoading ? 'bg-gray-300' : 'bg-[#FF6B00] shadow-[0_4px_14px_rgba(255,107,0,0.35)]'
+              }`}
             >
               {isLoading ? 'Signing in...' : (<>Sign In <ArrowRight size={16} /></>)}
             </motion.button>
@@ -197,7 +190,7 @@ export default function LoginPage() {
 
           <p className="text-center text-[13px] text-[#777777] mt-6">
             Don't have an account?{' '}
-            <Link href="/register" className="font-semibold" style={{ color: '#FF6B00' }}>
+            <Link href="/register" className="font-semibold text-[#FF6B00]">
               Register your center
             </Link>
           </p>
@@ -219,8 +212,7 @@ export default function LoginPage() {
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
               onClick={e => e.stopPropagation()}
-              className="w-full max-w-sm p-6 rounded-2xl"
-              style={{ background: '#FFFFFF', border: '1px solid #ECECEC' }}
+              className="w-full max-w-sm p-6 rounded-2xl bg-white border border-[#ECECEC]"
             >
               <h3 className="text-[16px] font-bold text-[#111111] mb-1">Reset Password</h3>
               <p className="text-[13px] text-[#777777] mb-4">Enter your email to receive a reset link</p>
@@ -228,11 +220,8 @@ export default function LoginPage() {
                 type="email"
                 value={forgotEmail}
                 onChange={e => setForgotEmail(e.target.value)}
-                className="w-full px-4 py-3 text-[14px] rounded-xl outline-none mb-4"
-                style={{ background: '#F7F7F7', border: '1.5px solid #ECECEC', color: '#111111' }}
+                className="w-full px-4 py-3 text-[14px] rounded-xl outline-none mb-4 bg-[#F7F7F7] border border-[#ECECEC] text-[#111111] focus:border-[#FF6B00]"
                 placeholder="your@email.com"
-                onFocus={e => { e.currentTarget.style.borderColor = '#FF6B00'; }}
-                onBlur={e => { e.currentTarget.style.borderColor = '#ECECEC'; }}
               />
               <div className="flex gap-3">
                 <button onClick={() => setShowForgot(false)}
@@ -240,8 +229,7 @@ export default function LoginPage() {
                   Cancel
                 </button>
                 <button onClick={handleForgotPassword} disabled={forgotLoading}
-                  className="flex-1 py-2.5 rounded-xl text-[13px] font-bold text-white"
-                  style={{ background: '#FF6B00' }}>
+                  className="flex-1 py-2.5 rounded-xl text-[13px] font-bold text-white bg-[#FF6B00]">
                   {forgotLoading ? 'Sending...' : 'Send Link'}
                 </button>
               </div>

@@ -46,7 +46,7 @@ export default function PurchasesPage() {
   const [qtyInput, setQtyInput] = useState<number | ''>('');
   const [rateInput, setRateInput] = useState<number | ''>('');
   const [discountInput, setDiscountInput] = useState<number | ''>('');
-  
+
   // Transport & Discount
   const [overallDiscount, setOverallDiscount] = useState<number | ''>('');
   const [transportCost, setTransportCost] = useState<number | ''>('');
@@ -115,12 +115,11 @@ export default function PurchasesPage() {
 
     setSelectedItem(item);
     setSearchItemTerm(item.name);
-    
+
     // Load variants
     try {
       const allVars = await inventoryService.getVariants(centerId!, item.id);
-      // Only show variants where purchaseAllowed is not explicitly false (backward-compat for old records)
-      const purchaseVars = allVars.filter(v => v.purchaseAllowed !== false && v.status === 'active');
+      const purchaseVars = allVars.filter(v => v.isActive !== false);
       setItemVariants(purchaseVars);
       if (purchaseVars.length > 0) {
         setSelectedVariantId(purchaseVars[0].id);
@@ -130,7 +129,7 @@ export default function PurchasesPage() {
       } else {
         setSelectedVariantId('');
         setRateInput('');
-        toast.warning('No purchase-eligible variants for this item. Enable "Allow in Purchases" on at least one variant.');
+        toast.warning('No active variants for this item.');
       }
     } catch {
       toast.error('Failed to load item variants');
@@ -179,6 +178,7 @@ export default function PurchasesPage() {
       variantId: selectedVariantId,
       variantName: variant.name,
       quantity: qty,
+      packageSizeSnapshot: variant.packageSize || 1,
       purchaseRate: rate,
       gstPercent,
       gstAmount,
@@ -253,7 +253,7 @@ export default function PurchasesPage() {
     try {
       await purchaseService.add(centerId, pData, profile?.name || 'user');
       toast.success('Purchase Invoice saved successfully');
-      
+
       // Reset form
       setCart([]);
       setSelectedVendorId('');
@@ -261,7 +261,7 @@ export default function PurchasesPage() {
       setTransportCost('');
       setPaidAmount('');
       setNotes('');
-      
+
       // Reload lists
       loadData();
     } catch (err: any) {
@@ -286,10 +286,10 @@ export default function PurchasesPage() {
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
+
         {/* Left Form Side */}
         <div className="lg:col-span-2 space-y-6">
-          
+
           {/* Vendor Details */}
           <div style={cardStyle} className="p-6 space-y-4">
             <h3 className="text-[14px] font-bold text-[#111111] border-b border-[#ECECEC] pb-2 flex items-center gap-1.5">
@@ -326,7 +326,7 @@ export default function PurchasesPage() {
                   className="w-full px-4 py-2.5 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[13px] font-semibold text-[#111] outline-none"
                 >
                   <option value="">-- Choose --</option>
-                  {vendorType === 'supplier' 
+                  {vendorType === 'supplier'
                     ? suppliers.map(s => <option key={s.id} value={s.id}>{s.name} (₹{formatCurrency(s.pendingAmount)})</option>)
                     : farmers.map(f => <option key={f.id} value={f.id}>{f.name} ({f.id})</option>)
                   }
@@ -375,7 +375,7 @@ export default function PurchasesPage() {
                   }}
                   className="w-full px-4 py-2.5 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[13px] font-semibold text-[#111] outline-none focus:border-[#FF6B00]"
                 />
-                
+
                 {searchItemTerm && !selectedItem && (
                   <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-[#ECECEC] rounded-xl shadow-lg max-h-48 overflow-y-auto z-10 p-2 divide-y divide-gray-50">
                     {items
@@ -404,7 +404,7 @@ export default function PurchasesPage() {
                 >
                   <option value="">Select Variant</option>
                   {itemVariants.map(v => (
-                    <option key={v.id} value={v.id}>{v.name} (Stock: {v.currentStock})</option>
+                    <option key={v.id} value={v.id}>{v.name} (Stock: {Math.floor(((selectedItem?.stockInBaseUnit) || 0) / (v.packageSize || 1))})</option>
                   ))}
                 </select>
               </div>
@@ -508,7 +508,7 @@ export default function PurchasesPage() {
         <div className="space-y-6">
           <div style={cardStyle} className="p-6 space-y-4">
             <h3 className="text-[15px] font-bold text-[#111111] border-b border-[#ECECEC] pb-2">3. Purchase Summary</h3>
-            
+
             <div className="space-y-3.5 text-[13px] font-semibold text-[#555]">
               <div className="flex justify-between">
                 <span>Subtotal</span>
@@ -571,7 +571,7 @@ export default function PurchasesPage() {
               )}
 
               <div className="text-[11px] bg-gray-50 border border-gray-100 rounded-xl p-3 text-gray-500 font-semibold leading-relaxed">
-                Status: <span className="font-extrabold text-[#111] uppercase">{paymentStatus}</span> <br/>
+                Status: <span className="font-extrabold text-[#111] uppercase">{paymentStatus}</span> <br />
                 Stock increments and accounting updates will process atomically on save.
               </div>
 

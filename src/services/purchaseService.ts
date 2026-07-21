@@ -95,49 +95,33 @@ export const purchaseService = {
     for (const item of data.items) {
       if (itemStocks[item.itemId] === undefined) {
         const localItem = await offlineDb.inventoryItems.get(item.itemId);
-        itemStocks[item.itemId] = localItem?.currentStock || 0;
+        itemStocks[item.itemId] = localItem?.stockInBaseUnit || 0;
       }
       const localVariant = await offlineDb.inventoryVariants.get(item.variantId);
-      const conversionQty = localVariant?.conversionQty || 1;
-      const convertedQty = item.quantity * conversionQty;
+      const packageSize = localVariant?.packageSize || item.packageSizeSnapshot || 1;
+      const convertedQty = item.quantity * packageSize;
       itemStocks[item.itemId] += convertedQty;
     }
 
-    const stockUpdates: Array<{itemId: string, variantId: string, newVariantStock: number, newItemStock: number}> = [];
+    const stockUpdates: Array<{ itemId: string, newItemStock: number }> = [];
     const auditLogs: any[] = [];
 
     for (const item of data.items) {
       const localVariant = await offlineDb.inventoryVariants.get(item.variantId);
       const localItem = await offlineDb.inventoryItems.get(item.itemId);
 
-      const prevVariantStock = localVariant?.currentStock || 0;
-      const prevItemStock = localItem?.currentStock || 0;
-
-      const conversionQty = localVariant?.conversionQty || 1;
-      const convertedQty = item.quantity * conversionQty;
-
+      const prevItemStock = localItem?.stockInBaseUnit || 0;
+      const packageSize = localVariant?.packageSize || item.packageSizeSnapshot || 1;
+      const convertedQty = item.quantity * packageSize;
       const finalItemStock = itemStocks[item.itemId];
-      const newVariantStock = finalItemStock / conversionQty;
 
-      // Update all variants belonging to the parent item to their equivalent stock
-      const allVariants = await offlineDb.inventoryVariants.where('itemId').equals(item.itemId).toArray();
-      for (const v of allVariants) {
-        const vConversion = v.conversionQty || 1;
-        const vNewStock = finalItemStock / vConversion;
+      stockUpdates.push({
+        itemId: item.itemId,
+        newItemStock: finalItemStock
+      });
 
-        const dupIdx = stockUpdates.findIndex(su => su.variantId === v.id);
-        if (dupIdx > -1) {
-          stockUpdates[dupIdx].newVariantStock = vNewStock;
-          stockUpdates[dupIdx].newItemStock = finalItemStock;
-        } else {
-          stockUpdates.push({
-            itemId: item.itemId,
-            variantId: v.id,
-            newVariantStock: vNewStock,
-            newItemStock: finalItemStock
-          });
-        }
-      }
+      // Save package size snapshot to the transaction record
+      item.packageSizeSnapshot = packageSize;
 
       auditLogs.push({
         id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -145,12 +129,12 @@ export const purchaseService = {
         itemName: item.itemName,
         variantId: item.variantId,
         variantName: item.variantName,
-        prevStock: prevVariantStock,
-        newStock: newVariantStock,
-        quantity: item.quantity,
+        prevStock: prevItemStock,
+        newStock: finalItemStock,
+        quantity: convertedQty, // Base unit quantity logged
         actionType: 'purchase',
         referenceId: purchaseId,
-        reason: `Purchase Entry ${purchaseNumber} (${item.quantity} ${item.variantName} = ${convertedQty} ${localItem?.unit || 'KG'})`,
+        reason: `Purchase Entry ${purchaseNumber} (${item.quantity} ${item.variantName} = ${convertedQty} ${localItem?.baseUnit || 'KG'})`,
         createdBy,
         createdAt: new Date(),
         centerId
@@ -227,10 +211,7 @@ export const purchaseService = {
         // Update Stock levels in Firestore
         for (const update of stockUpdates) {
           const itemDocRef = doc(db, 'centers', centerId, 'inventory_items', update.itemId);
-          await setDoc(itemDocRef, { currentStock: update.newItemStock, stock: update.newItemStock }, { merge: true });
-
-          const varDocRef = doc(db, 'centers', centerId, 'inventory_variants', update.variantId);
-          await setDoc(varDocRef, { currentStock: update.newVariantStock }, { merge: true });
+          await setDoc(itemDocRef, { stockInBaseUnit: update.newItemStock }, { merge: true });
         }
 
         // Write Audit Logs in Firestore
@@ -285,8 +266,7 @@ export const purchaseService = {
         }
 
         for (const update of stockUpdates) {
-          await offlineDb.inventoryVariants.update(update.variantId, { currentStock: update.newVariantStock });
-          await offlineDb.inventoryItems.update(update.itemId, { currentStock: update.newItemStock, stock: update.newItemStock });
+          await offlineDb.inventoryItems.update(update.itemId, { stockInBaseUnit: update.newItemStock });
         }
 
         for (const log of auditLogs) {
@@ -345,8 +325,7 @@ export const purchaseService = {
     }
 
     for (const update of stockUpdates) {
-      await offlineDb.inventoryVariants.update(update.variantId, { currentStock: update.newVariantStock });
-      await offlineDb.inventoryItems.update(update.itemId, { currentStock: update.newItemStock, stock: update.newItemStock });
+      await offlineDb.inventoryItems.update(update.itemId, { stockInBaseUnit: update.newItemStock });
     }
 
     for (const log of auditLogs) {
@@ -398,34 +377,20 @@ export const purchaseService = {
       // 1. Revert stock changes
       const pItems = await purchaseService.getItemsByPurchase(centerId, id);
       for (const item of pItems) {
-        const localVariant = await offlineDb.inventoryVariants.get(item.variantId);
         const localItem = await offlineDb.inventoryItems.get(item.itemId);
         
-        if (localVariant && localItem) {
-          const conversionQty = localVariant.conversionQty || 1;
-          const convertedQty = item.quantity * conversionQty;
-          const newParentStock = (localItem.currentStock || 0) - convertedQty;
+        if (localItem) {
+          const packageSize = item.packageSizeSnapshot || 1;
+          const convertedQty = item.quantity * packageSize;
+          const newParentStock = (localItem.stockInBaseUnit || 0) - convertedQty;
 
           // Update parent item stock and mark it for sync
           await offlineDb.inventoryItems.put({
             ...localItem,
-            currentStock: newParentStock,
-            stock: newParentStock, // Legacy compatibility
+            stockInBaseUnit: newParentStock,
             pendingSync: 1,
             localUpdatedAt: Date.now()
           });
-
-          // Recalculate equivalent stock for all variants of this item
-          const allVariants = await offlineDb.inventoryVariants.where('itemId').equals(item.itemId).toArray();
-          for (const v of allVariants) {
-            const vConversion = v.conversionQty || 1;
-            const vNewStock = newParentStock / vConversion;
-            await offlineDb.inventoryVariants.put({
-              ...v,
-              currentStock: vNewStock,
-              localUpdatedAt: Date.now()
-            });
-          }
         }
       }
 

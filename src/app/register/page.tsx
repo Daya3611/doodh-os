@@ -95,6 +95,10 @@ export default function RegisterPage() {
 
       await batch.commit();
 
+      // Set cookies immediately so middleware has them during the redirect
+      document.cookie = `session=true; path=/; max-age=31536000; SameSite=Lax`;
+      document.cookie = `user-role=OWNER; path=/; max-age=31536000; SameSite=Lax`;
+
       toast.success('Center created successfully! Welcome to DoodhOS.');
       router.push('/dashboard');
     } catch (error: any) {
@@ -106,14 +110,10 @@ export default function RegisterPage() {
     }
   };
 
-  const inputStyle = { background: '#F7F7F7', border: '1.5px solid #ECECEC', color: '#111111' };
-  const focusStyle = (e: React.FocusEvent<HTMLInputElement>) => { e.currentTarget.style.borderColor = '#FF6B00'; };
-  const blurStyle = (e: React.FocusEvent<HTMLInputElement>) => { e.currentTarget.style.borderColor = '#ECECEC'; };
-
   return (
-    <div className="min-h-screen flex" style={{ background: '#F7F7F7' }}>
+    <div className="min-h-screen flex bg-[#F7F7F7]">
       {/* Left brand panel */}
-      <div className="hidden lg:flex flex-col justify-between w-[420px] p-12 flex-shrink-0" style={{ background: '#FF6B00' }}>
+      <div className="hidden lg:flex flex-col justify-between w-[420px] p-12 flex-shrink-0 bg-[#FF6B00]">
         <div className="flex items-center gap-3">
           <img src="/logo.svg" alt="DoodhOS Logo" className="h-10 w-auto brightness-0 invert" />
         </div>
@@ -154,16 +154,16 @@ export default function RegisterPage() {
             {steps.map((s, i) => (
               <div key={s} className="flex items-center gap-2">
                 <div
-                  className="w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold transition-all"
-                  style={{
-                    background: i <= step ? '#FF6B00' : '#ECECEC',
-                    color: i <= step ? '#FFFFFF' : '#AAAAAA',
-                  }}
+                  className={`w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold transition-all ${
+                    i <= step ? 'bg-[#FF6B00] text-white' : 'bg-[#ECECEC] text-[#AAAAAA]'
+                  }`}
                 >
                   {i < step ? '✓' : i + 1}
                 </div>
-                <span className="text-[12px] font-medium" style={{ color: i <= step ? '#111111' : '#AAAAAA' }}>{s}</span>
-                {i < steps.length - 1 && <div className="w-8 h-px" style={{ background: i < step ? '#FF6B00' : '#ECECEC' }} />}
+                <span className={`text-[12px] font-medium ${i <= step ? 'text-[#111111]' : 'text-[#AAAAAA]'}`}>{s}</span>
+                {i < steps.length - 1 && (
+                  <div className={`w-8 h-px ${i < step ? 'bg-[#FF6B00]' : 'bg-[#ECECEC]'}`} />
+                )}
               </div>
             ))}
           </div>
@@ -173,17 +173,27 @@ export default function RegisterPage() {
               <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-4">
                 <div>
                   <label className="text-[12px] font-semibold text-[#777777] uppercase tracking-wider mb-2 block">Center Name</label>
-                  <input {...register('centerName')} className="w-full px-4 py-3 text-[14px] rounded-xl outline-none transition-all" style={inputStyle} placeholder="Shree Krishna Dairy" onFocus={focusStyle} onBlur={blurStyle} />
+                  <input
+                    {...register('centerName')}
+                    className="w-full px-4 py-3 text-[14px] rounded-xl outline-none transition-all bg-[#F7F7F7] border border-[#ECECEC] text-[#111111] focus:border-[#FF6B00]"
+                    placeholder="Shree Krishna Dairy"
+                  />
                   {errors.centerName && <p className="text-[11px] text-red-500 mt-1">{errors.centerName.message}</p>}
                 </div>
                 <div>
                   <label className="text-[12px] font-semibold text-[#777777] uppercase tracking-wider mb-2 block">Owner Name</label>
-                  <input {...register('ownerName')} className="w-full px-4 py-3 text-[14px] rounded-xl outline-none transition-all" style={inputStyle} placeholder="Ramesh Sharma" onFocus={focusStyle} onBlur={blurStyle} />
+                  <input
+                    {...register('ownerName')}
+                    className="w-full px-4 py-3 text-[14px] rounded-xl outline-none transition-all bg-[#F7F7F7] border border-[#ECECEC] text-[#111111] focus:border-[#FF6B00]"
+                    placeholder="Ramesh Sharma"
+                  />
                   {errors.ownerName && <p className="text-[11px] text-red-500 mt-1">{errors.ownerName.message}</p>}
                 </div>
-                <button type="button" onClick={nextStep}
-                  className="w-full flex items-center justify-center gap-2 py-3.5 text-[15px] font-bold text-white rounded-xl mt-2"
-                  style={{ background: '#FF6B00', boxShadow: '0 4px 14px rgba(255,107,0,0.35)' }}>
+                <button
+                  type="button"
+                  onClick={nextStep}
+                  className="w-full flex items-center justify-center gap-2 py-3.5 text-[15px] font-bold text-white rounded-xl mt-2 bg-[#FF6B00] shadow-[0_4px_14px_rgba(255,107,0,0.35)]"
+                >
                   Next Step <ArrowRight size={16} />
                 </button>
               </motion.div>
@@ -193,18 +203,32 @@ export default function RegisterPage() {
               <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-4">
                 <div>
                   <label className="text-[12px] font-semibold text-[#777777] uppercase tracking-wider mb-2 block">Email</label>
-                  <input {...register('email')} type="email" className="w-full px-4 py-3 text-[14px] rounded-xl outline-none transition-all" style={inputStyle} placeholder="owner@doodhos.com" onFocus={focusStyle} onBlur={blurStyle} />
+                  <input
+                    {...register('email')}
+                    type="email"
+                    className="w-full px-4 py-3 text-[14px] rounded-xl outline-none transition-all bg-[#F7F7F7] border border-[#ECECEC] text-[#111111] focus:border-[#FF6B00]"
+                    placeholder="owner@doodhos.com"
+                  />
                   {errors.email && <p className="text-[11px] text-red-500 mt-1">{errors.email.message}</p>}
                 </div>
                 <div>
                   <label className="text-[12px] font-semibold text-[#777777] uppercase tracking-wider mb-2 block">Phone</label>
-                  <input {...register('phone')} className="w-full px-4 py-3 text-[14px] rounded-xl outline-none transition-all" style={inputStyle} placeholder="9876543210" onFocus={focusStyle} onBlur={blurStyle} />
+                  <input
+                    {...register('phone')}
+                    className="w-full px-4 py-3 text-[14px] rounded-xl outline-none transition-all bg-[#F7F7F7] border border-[#ECECEC] text-[#111111] focus:border-[#FF6B00]"
+                    placeholder="9876543210"
+                  />
                   {errors.phone && <p className="text-[11px] text-red-500 mt-1">{errors.phone.message}</p>}
                 </div>
                 <div>
                   <label className="text-[12px] font-semibold text-[#777777] uppercase tracking-wider mb-2 block">Password</label>
                   <div className="relative">
-                    <input {...register('password')} type={showPassword ? 'text' : 'password'} className="w-full px-4 py-3 pr-12 text-[14px] rounded-xl outline-none transition-all" style={inputStyle} placeholder="••••••••" onFocus={focusStyle} onBlur={blurStyle} />
+                    <input
+                      {...register('password')}
+                      type={showPassword ? 'text' : 'password'}
+                      className="w-full px-4 py-3 pr-12 text-[14px] rounded-xl outline-none transition-all bg-[#F7F7F7] border border-[#ECECEC] text-[#111111] focus:border-[#FF6B00]"
+                      placeholder="••••••••"
+                    />
                     <button type="button" onClick={() => setShowPassword(v => !v)} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[#AAAAAA]">
                       {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
@@ -212,8 +236,11 @@ export default function RegisterPage() {
                   {errors.password && <p className="text-[11px] text-red-500 mt-1">{errors.password.message}</p>}
                 </div>
                 <div className="flex gap-3 mt-2">
-                  <button type="button" onClick={() => setStep(0)}
-                    className="flex-1 py-3.5 rounded-xl text-[14px] font-semibold border border-[#ECECEC] text-[#555]">
+                  <button
+                    type="button"
+                    onClick={() => setStep(0)}
+                    className="flex-1 py-3.5 rounded-xl text-[14px] font-semibold border border-[#ECECEC] text-[#555]"
+                  >
                     Back
                   </button>
                   <motion.button
@@ -221,8 +248,10 @@ export default function RegisterPage() {
                     whileTap={!isLoading ? { scale: 0.99 } : {}}
                     type="submit"
                     disabled={isLoading}
-                    className="flex-1 flex items-center justify-center gap-2 py-3.5 text-[15px] font-bold text-white rounded-xl"
-                    style={{ background: isLoading ? '#DDDDDD' : '#FF6B00', boxShadow: !isLoading ? '0 4px 14px rgba(255,107,0,0.35)' : 'none' }}>
+                    className={`flex-1 flex items-center justify-center gap-2 py-3.5 text-[15px] font-bold text-white rounded-xl ${
+                      isLoading ? 'bg-gray-300' : 'bg-[#FF6B00] shadow-[0_4px_14px_rgba(255,107,0,0.35)]'
+                    }`}
+                  >
                     {isLoading ? 'Creating...' : 'Create Center'}
                   </motion.button>
                 </div>
@@ -232,7 +261,7 @@ export default function RegisterPage() {
 
           <p className="text-center text-[13px] text-[#777777] mt-6">
             Already registered?{' '}
-            <Link href="/login" className="font-semibold" style={{ color: '#FF6B00' }}>Sign in</Link>
+            <Link href="/login" className="font-semibold text-[#FF6B00]">Sign in</Link>
           </p>
         </motion.div>
       </div>

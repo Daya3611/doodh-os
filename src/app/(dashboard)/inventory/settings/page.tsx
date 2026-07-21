@@ -90,7 +90,7 @@ export default function InventorySettingsPage() {
         </div>
 
         <div className="space-y-4">
-          
+
           {/* Negative Stock Toggle */}
           <div className="flex items-start justify-between gap-4 p-3.5 bg-gray-50 border border-gray-100 rounded-2xl">
             <div className="space-y-0.5">

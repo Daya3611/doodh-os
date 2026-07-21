@@ -19,8 +19,6 @@ export const PREDEFINED_UNITS = [
 ] as const;
 
 // 1. Item Master Schema
-// NOTE: defaultPurchasePrice / defaultSellingPrice are kept for backward-compatibility with old
-// records but are NO LONGER required. All pricing is managed at the variant level.
 export const inventoryItemSchema = z.object({
   name: z.string().min(2, 'Item name must be at least 2 characters'),
   category: z.string().min(1, 'Category is required'),
@@ -28,13 +26,10 @@ export const inventoryItemSchema = z.object({
   sku: z.string().min(1, 'SKU is required'),
   barcode: z.string().optional(),
   description: z.string().optional(),
-  // Legacy price fields — optional; prefer variant-level pricing
-  defaultPurchasePrice: z.number().min(0).optional().default(0),
-  defaultSellingPrice: z.number().min(0).optional().default(0),
   gst: z.number().min(0, 'GST must be positive').max(100, 'GST cannot exceed 100%'),
-  unit: z.string().min(1, 'Base unit is required'),
+  baseUnit: z.string().min(1, 'Base unit is required'),
   minimumStock: z.number().min(0, 'Minimum stock must be positive'),
-  currentStock: z.number().default(0),
+  stockInBaseUnit: z.number().default(0),
   maximumStock: z.number().min(0, 'Maximum stock must be positive'),
   status: z.enum(['active', 'inactive']).default('active'),
   image: z.string().optional(),
@@ -46,28 +41,39 @@ export interface InventoryItem extends InventoryItemFormData {
   id: string;
   createdAt: Timestamp | Date;
   updatedAt: Timestamp | Date;
-  price: number; // Legacy compatibility
-  stock: number; // Legacy compatibility
 }
 
 // 2. Variants
+/**
+ * InventoryVariant — Packaging Definition Only
+ *
+ * ⚠️  INVARIANT: This type MUST NEVER contain any stock field.
+ *
+ * Forbidden fields:
+ *   stock, currentStock, availableStock, quantity, remaining
+ *
+ * Available stock is ALWAYS derived at runtime:
+ *   availablePackages = Math.floor(item.stockInBaseUnit / variant.packageSize)
+ *
+ * Allowed fields: packageSize, purchasePrice, sellingPrice, barcode, sku, name,
+ *                 itemId, isDefault, isActive, createdAt
+ *
+ * Rationale: Stock belongs exclusively to InventoryItem.stockInBaseUnit (base unit).
+ *            Variants are purely packaging multipliers. Storing stock per-variant
+ *            causes double-counting, sync errors, and breaks the conversion formula.
+ */
+
 export interface InventoryVariant {
   id: string;
   itemId: string;
-  name: string;          // e.g., "50 KG Bag", "1 L"
-  unit: string;          // Variant's own unit, e.g., "Bag"
-  conversionQty: number; // How many base units 1 of this variant equals, e.g., 50
-  baseUnit: string;      // Item's base unit, e.g., "KG"
-  purchasePrice: number; // Price for 1 unit of this variant
-  sellingPrice: number;  // Selling price for 1 unit of this variant
-  currentStock: number;  // Stock expressed in variant units (derived from base stock)
+  name: string;          // e.g., "Bag", "Box", "Carton", "Loose"
+  packageSize: number;   // Conversion multiplier, e.g. 50 (50 KG per Bag)
+  purchasePrice: number;   // Price per variant pack, e.g., 1500
+  sellingPrice: number;    // Selling price per variant pack, e.g., 2000
   barcode: string;
   sku: string;
-  status: 'active' | 'inactive';
-  /** If false, this variant will NOT appear in the Purchases screen */
-  purchaseAllowed: boolean;
-  /** If false, this variant will NOT appear in the Sales screen */
-  sellingAllowed: boolean;
+  isDefault: boolean;
+  isActive: boolean;
   createdAt: Timestamp | Date;
 }
 
@@ -93,8 +99,9 @@ export interface PurchaseEntryItem {
   itemName: string;
   variantId: string;
   variantName: string;
-  quantity: number;
-  purchaseRate: number;
+  quantity: number; // Purchase quantity in package units (e.g. 20 Bags)
+  packageSizeSnapshot: number; // packageSize at transaction time (e.g. 50)
+  purchaseRate: number; // Purchase price per variant package (e.g. 1500)
   gstPercent: number;
   gstAmount: number;
   discount: number;
@@ -127,8 +134,9 @@ export interface SalesEntryItem {
   itemName: string;
   variantId: string;
   variantName: string;
-  quantity: number;
-  sellingPrice: number;
+  quantity: number; // Sales quantity in package units
+  packageSizeSnapshot: number; // packageSize at transaction time
+  sellingPrice: number; // Selling price per variant package
   gstPercent: number;
   gstAmount: number;
   discount: number;
@@ -159,7 +167,8 @@ export interface StockAdjustment {
   itemName: string;
   variantId: string;
   variantName: string;
-  quantity: number; // positive for addition, negative for deduction
+  quantity: number; // positive for addition, negative for deduction (in packages)
+  packageSizeSnapshot: number;
   reason: 'damage' | 'expired' | 'lost' | 'manual_correction' | 'opening_balance' | 'other';
   notes?: string;
   createdBy: string;

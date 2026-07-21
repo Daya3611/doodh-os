@@ -43,7 +43,7 @@ export default function SalesPage() {
   const [qtyInput, setQtyInput] = useState<number | ''>('');
   const [rateInput, setRateInput] = useState<number | ''>('');
   const [discountInput, setDiscountInput] = useState<number | ''>('');
-  
+
   // Overall discount
   const [overallDiscount, setOverallDiscount] = useState<number | ''>('');
 
@@ -94,12 +94,11 @@ export default function SalesPage() {
 
     setSelectedItem(item);
     setSearchItemTerm(item.name);
-    
+
     // Load variants
     try {
       const allVars = await inventoryService.getVariants(centerId!, item.id);
-      // Only show variants where sellingAllowed is not explicitly false (backward-compat for old records)
-      const salesVars = allVars.filter(v => v.sellingAllowed !== false && v.status === 'active');
+      const salesVars = allVars.filter(v => v.isActive !== false);
       setItemVariants(salesVars);
       if (salesVars.length > 0) {
         setSelectedVariantId(salesVars[0].id);
@@ -109,7 +108,7 @@ export default function SalesPage() {
       } else {
         setSelectedVariantId('');
         setRateInput('');
-        toast.warning('No sales-eligible variants for this item. Enable "Allow in Sales" on at least one variant.');
+        toast.warning('No active variants for this item.');
       }
     } catch {
       toast.error('Failed to load item variants');
@@ -144,8 +143,11 @@ export default function SalesPage() {
     if (!variant) return;
 
     // Check negative stock constraint
-    if (!settings.enableNegativeStock && variant.currentStock < qty) {
-      toast.error(`Insufficient stock. Available: ${variant.currentStock} ${variant.unit || 'units'}.`);
+    const packageSize = variant.packageSize || 1;
+    const requestedBaseQty = qty * packageSize;
+    const availableStock = selectedItem.stockInBaseUnit || 0;
+    if (!settings.enableNegativeStock && availableStock < requestedBaseQty) {
+      toast.error(`Insufficient stock. Available: ${availableStock} ${selectedItem.baseUnit || 'units'}.`);
       return;
     }
 
@@ -161,6 +163,7 @@ export default function SalesPage() {
       variantId: selectedVariantId,
       variantName: variant.name,
       quantity: qty,
+      packageSizeSnapshot: packageSize,
       sellingPrice: rate,
       gstPercent,
       gstAmount,
@@ -241,14 +244,14 @@ export default function SalesPage() {
     try {
       await salesService.add(centerId, sData, profile?.name || 'user');
       toast.success('Sales Invoice completed & stock updated');
-      
+
       // Reset form
       setCart([]);
       setSelectedFarmerId('');
       setGuestName('');
       setOverallDiscount('');
       setNotes('');
-      
+
       // Reload lists
       loadData();
     } catch (err: any) {
@@ -262,10 +265,10 @@ export default function SalesPage() {
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
+
         {/* Left Form Side */}
         <div className="lg:col-span-2 space-y-6">
-          
+
           {/* Customer Selection */}
           <div style={cardStyle} className="p-6 space-y-4">
             <h3 className="text-[14px] font-bold text-[#111111] border-b border-[#ECECEC] pb-2 flex items-center gap-1.5">
@@ -369,11 +372,11 @@ export default function SalesPage() {
                   }}
                   className="w-full px-4 py-2.5 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[13px] font-semibold text-[#111] outline-none focus:border-[#FF6B00]"
                 />
-                
+
                 {searchItemTerm && !selectedItem && (() => {
-                  const filtered = items.filter(i => 
-                    i.name.toLowerCase().includes(searchItemTerm.toLowerCase()) || 
-                    i.sku.toLowerCase().includes(searchItemTerm.toLowerCase()) || 
+                  const filtered = items.filter(i =>
+                    i.name.toLowerCase().includes(searchItemTerm.toLowerCase()) ||
+                    i.sku.toLowerCase().includes(searchItemTerm.toLowerCase()) ||
                     (i.barcode && i.barcode.toLowerCase().includes(searchItemTerm.toLowerCase()))
                   );
 
@@ -416,7 +419,7 @@ export default function SalesPage() {
                 >
                   <option value="">Select Variant</option>
                   {itemVariants.map(v => (
-                    <option key={v.id} value={v.id}>{v.name} (Stock: {v.currentStock})</option>
+                    <option key={v.id} value={v.id}>{v.name} (Stock: {Math.floor(((selectedItem?.stockInBaseUnit) || 0) / (v.packageSize || 1))})</option>
                   ))}
                 </select>
               </div>
@@ -520,7 +523,7 @@ export default function SalesPage() {
         <div className="space-y-6">
           <div style={cardStyle} className="p-6 space-y-4">
             <h3 className="text-[15px] font-bold text-[#111111] border-b border-[#ECECEC] pb-2">3. Invoice Summary</h3>
-            
+
             <div className="space-y-3.5 text-[13px] font-semibold text-[#555]">
               <div className="flex justify-between">
                 <span>Subtotal (incl. Tax)</span>
@@ -564,7 +567,7 @@ export default function SalesPage() {
                 ) : (
                   <span>Transaction will settle immediately in full.</span>
                 )}
-                <br/>
+                <br />
                 Stock levels decrease automatically.
               </div>
 
