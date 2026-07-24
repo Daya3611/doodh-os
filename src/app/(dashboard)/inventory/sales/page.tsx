@@ -443,6 +443,7 @@ export default function SalesPage() {
                   value={rateInput}
                   onChange={e => setRateInput(e.target.value ? Number(e.target.value) : '')}
                   className="w-full px-4 py-2 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[13px] font-semibold text-[#111] outline-none"
+                  readOnly
                 />
               </div>
 

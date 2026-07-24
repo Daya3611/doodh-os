@@ -3,8 +3,8 @@ import {
   collection, doc, getDocs, setDoc, deleteDoc, query,
   serverTimestamp, orderBy, where, getDoc, Timestamp
 } from 'firebase/firestore';
-import { InventoryItem, InventoryItemFormData, InventoryVariant, StockAdjustment, InventoryLog, InventorySettings } from '@/types';
-import { offlineDb } from '@/lib/offlineDb';
+import { InventoryItem, InventoryItemFormData, InventoryVariant, VariantDraftRow, StockAdjustment, InventoryLog, InventorySettings } from '@/types';
+import { offlineDb, OfflineInventoryItem } from '@/lib/offlineDb';
 import { toSafeNumber } from '@/utils/format';
 
 // Default seeded masters
@@ -12,22 +12,56 @@ const DEFAULT_CATEGORIES = ['Cattle Feed', 'Medicines', 'Equipment', 'Milking Ac
 const DEFAULT_BRANDS = ['DoodhOS', 'Godrej Vetfeed', 'Kanak', 'Kapila', 'Himalaya', 'Generic'];
 const DEFAULT_UNITS = ['Piece', 'KG', 'Gram', 'Litre', 'ML', 'Bag', 'Packet', 'Box', 'Bottle', 'Can'];
 
-/** Ensures all numeric fields on a variant are proper numbers, never undefined.
- *  Also defaults purchaseAllowed/sellingAllowed to true for old records that lack these fields.
+/** Normalizes an InventoryItem ensuring default 3-tier unit properties are present */
+function normalizeItem(item: any): InventoryItem {
+  const stockUnit = item.stockUnit || item.baseUnit || 'KG';
+  const defaultPurchaseUnit = item.defaultPurchaseUnit || item.purchaseUnit || `50 ${stockUnit} Bag`;
+  const purchaseMultiplier = toSafeNumber(item.purchaseMultiplier) || 1;
+  const purchasePrice = toSafeNumber(item.purchasePrice);
+  const averageCostPerBaseUnit = purchaseMultiplier > 0 ? Number((purchasePrice / purchaseMultiplier).toFixed(4)) : 0;
+  const stockInBaseUnit = item.stockInBaseUnit !== undefined ? item.stockInBaseUnit : (item.currentStock || item.stock || 0);
+
+  return {
+    ...item,
+    baseUnit: stockUnit,
+    stockUnit,
+    defaultPurchaseUnit,
+    purchaseMultiplier,
+    purchasePrice,
+    averageCostPerBaseUnit,
+    stockInBaseUnit,
+  };
+}
+
+/** Ensures all numeric fields on a variant are proper numbers.
+ *  Purchase cost is ALWAYS auto-calculated from item purchasePrice / purchaseMultiplier.
+ *  If pricingMode === 'auto', sellingPrice is auto-calculated using profitMargin.
  */
-function normalizeVariant(v: any): InventoryVariant {
-  const purchasePrice = toSafeNumber(v.purchasePrice !== undefined ? v.purchasePrice : v.purchasePricePerVariant);
-  const sellingPrice = toSafeNumber(v.sellingPrice !== undefined ? v.sellingPrice : v.sellingPricePerVariant);
-  
-  const packageSize = toSafeNumber(v.packageSize || v.conversionValue || v.conversionQty) || 1;
+function normalizeVariant(v: any, itemPurchasePrice = 0, itemPurchaseMultiplier = 1): InventoryVariant {
+  const multiplier = toSafeNumber(v.multiplier || v.packageSize || v.conversionValue || v.conversionQty) || 1;
   const name = v.name || v.variantName || v.conversionUnit || v.unit || 'Loose';
+
+  // Variant purchase cost is ALWAYS auto-calculated: multiplier * (itemPurchasePrice / itemPurchaseMultiplier)
+  const unitCost = itemPurchaseMultiplier > 0 ? (itemPurchasePrice / itemPurchaseMultiplier) : 0;
+  const purchasePrice = Number((multiplier * unitCost).toFixed(2));
+
+  const pricingMode = v.pricingMode === 'auto' ? 'auto' : 'manual';
+  const profitMargin = toSafeNumber(v.profitMargin || 0);
+
+  let sellingPrice = toSafeNumber(v.sellingPrice !== undefined ? v.sellingPrice : v.sellingPricePerVariant);
+  if (pricingMode === 'auto') {
+    sellingPrice = Number((purchasePrice * (1 + profitMargin / 100)).toFixed(2));
+  }
 
   return {
     id: v.id,
     itemId: v.itemId,
     name,
-    packageSize,
+    multiplier,
+    packageSize: multiplier,
     purchasePrice,
+    pricingMode,
+    profitMargin,
     sellingPrice,
     barcode: v.barcode || '',
     sku: v.sku || '',
@@ -54,16 +88,7 @@ export const inventoryService = {
     if (typeof window !== 'undefined' && navigator.onLine) {
       try {
         const snap = await getDocs(query(inventoryService.getCollectionRef(centerId), orderBy('name', 'asc')));
-        const cloudItems = snap.docs.map(d => {
-          const data = d.data();
-          const stockInBaseUnit = data.stockInBaseUnit !== undefined ? data.stockInBaseUnit : (data.currentStock || data.stock || 0);
-          const { currentStock, stock, price, defaultPurchasePrice, defaultSellingPrice, ...rest } = data;
-          return {
-            id: d.id,
-            ...rest,
-            stockInBaseUnit
-          } as InventoryItem;
-        });
+        const cloudItems = snap.docs.map(d => normalizeItem({ id: d.id, ...d.data() }));
 
         const syncTime = Date.now();
         for (const item of cloudItems) {
@@ -87,23 +112,17 @@ export const inventoryService = {
       .where('centerId').equals(centerId)
       .and(i => i.isDeleted !== 1)
       .toArray();
-    return local.map(i => {
-      const stockInBaseUnit = i.stockInBaseUnit !== undefined ? i.stockInBaseUnit : ((i as any).currentStock || (i as any).stock || 0);
-      return {
-        ...i,
-        stockInBaseUnit
-      } as InventoryItem;
-    }).sort((a, b) => a.name.localeCompare(b.name));
+    return local.map(normalizeItem).sort((a, b) => a.name.localeCompare(b.name));
   },
 
   add: async (centerId: string, data: InventoryItemFormData): Promise<string> => {
     const isOnline = typeof window !== 'undefined' && navigator.onLine;
     const itemId = `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-    const itemData = {
+    const itemData = normalizeItem({
       ...data,
       stockInBaseUnit: data.stockInBaseUnit || 0
-    };
+    });
 
     if (isOnline) {
       try {
@@ -115,28 +134,14 @@ export const inventoryService = {
         });
 
         await offlineDb.inventoryItems.put({
-          id: itemId,
           ...itemData,
+          id: itemId,
           centerId,
           createdAt: new Date(),
           updatedAt: new Date(),
           pendingSync: 0,
           isDeleted: 0,
           localUpdatedAt: Date.now()
-        });
-
-        // Also add a default variant matching the item itself (for simple single-unit items)
-        await inventoryService.addVariant(centerId, {
-          id: `var-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-          itemId,
-          name: 'Loose',
-          purchasePrice: 0,
-          sellingPrice: 0,
-          barcode: data.barcode || '',
-          sku: data.sku,
-          packageSize: 1,
-          isDefault: true,
-          isActive: true
         });
 
         return itemId;
@@ -147,27 +152,14 @@ export const inventoryService = {
 
     // Offline Save
     await offlineDb.inventoryItems.put({
-      id: itemId,
       ...itemData,
+      id: itemId,
       centerId,
       createdAt: new Date(),
       updatedAt: new Date(),
       pendingSync: 1,
       isDeleted: 0,
       localUpdatedAt: Date.now()
-    });
-
-    await inventoryService.addVariant(centerId, {
-      id: `var-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-      itemId,
-      name: 'Loose',
-      purchasePrice: 0,
-      sellingPrice: 0,
-      barcode: data.barcode || '',
-      sku: data.sku,
-      packageSize: 1,
-      isDefault: true,
-      isActive: true
     });
 
     return itemId;
@@ -179,11 +171,19 @@ export const inventoryService = {
     const local = await offlineDb.inventoryItems.get(itemId);
     if (!local) throw new Error('Item not found');
 
-    const updatedLocal = {
+    const normalized = normalizeItem({
       ...local,
-      ...data,
+      ...data
+    });
+
+    const updatedLocal: OfflineInventoryItem = {
+      ...local,
+      ...normalized,
+      centerId,
       updatedAt: new Date(),
-      localUpdatedAt: Date.now()
+      localUpdatedAt: Date.now(),
+      pendingSync: 0,
+      isDeleted: local.isDeleted || 0,
     };
 
     if (isOnline) {
@@ -194,10 +194,7 @@ export const inventoryService = {
           updatedAt: serverTimestamp(),
         }, { merge: true });
 
-        await offlineDb.inventoryItems.put({
-          ...updatedLocal,
-          pendingSync: 0,
-        });
+        await offlineDb.inventoryItems.put(updatedLocal);
         return;
       } catch (err) {
         console.warn("Failed to update inventory item online, writing offline:", err);
@@ -249,6 +246,15 @@ export const inventoryService = {
 
   // Variants Management
   getVariants: async (centerId: string, itemId: string): Promise<InventoryVariant[]> => {
+    let item: InventoryItem | undefined;
+    try {
+      const localItem = await offlineDb.inventoryItems.get(itemId);
+      if (localItem) item = normalizeItem(localItem);
+    } catch { }
+
+    const itemPrice = item?.purchasePrice || 0;
+    const itemMult = item?.purchaseMultiplier || 1;
+
     if (typeof window !== 'undefined' && navigator.onLine) {
       try {
         const q = query(inventoryService.getVariantCollectionRef(centerId), where('itemId', '==', itemId));
@@ -264,7 +270,7 @@ export const inventoryService = {
             localUpdatedAt: syncTime
           });
         }
-        return cloudVars.map(normalizeVariant);
+        return cloudVars.map(v => normalizeVariant(v, itemPrice, itemMult));
       } catch (err) {
         console.warn("Failed to fetch variants online, using local cache:", err);
       }
@@ -274,7 +280,7 @@ export const inventoryService = {
       .where('itemId').equals(itemId)
       .and(v => v.centerId === centerId)
       .toArray();
-    return local.map(normalizeVariant);
+    return local.map(v => normalizeVariant(v, itemPrice, itemMult));
   },
 
   addVariant: async (centerId: string, variant: Omit<InventoryVariant, 'createdAt' | 'id'> & { id?: string }): Promise<string> => {
@@ -382,6 +388,146 @@ export const inventoryService = {
         localUpdatedAt: Date.now()
       });
     }
+  },
+
+  saveItemWithVariants: async (
+    centerId: string,
+    itemData: InventoryItemFormData,
+    variants: VariantDraftRow[],
+    existingItemId?: string
+  ): Promise<string> => {
+    let itemId = existingItemId;
+
+    if (itemId) {
+      // Update item master
+      await inventoryService.update(centerId, itemId, itemData);
+
+      // Fetch existing variants
+      const existingVariants = await inventoryService.getVariants(centerId, itemId);
+      const keepVariantIds = new Set(variants.filter(v => v.id).map(v => v.id as string));
+
+      // Delete removed variants
+      for (const ev of existingVariants) {
+        if (!keepVariantIds.has(ev.id)) {
+          await inventoryService.deleteVariant(centerId, ev.id);
+        }
+      }
+
+      // Add or update passed variants
+      for (let i = 0; i < variants.length; i++) {
+        const v = variants[i];
+        const mult = Number(v.multiplier || v.packageSize || 1);
+        if (v.id && existingVariants.some(ev => ev.id === v.id)) {
+          await inventoryService.updateVariant(centerId, v.id, {
+            name: v.name,
+            multiplier: mult,
+            packageSize: mult,
+            purchasePrice: v.purchasePrice,
+            pricingMode: v.pricingMode || 'manual',
+            profitMargin: v.profitMargin || 0,
+            sellingPrice: v.sellingPrice,
+            barcode: v.barcode,
+            sku: v.sku,
+            isDefault: v.isDefault,
+            isActive: v.isActive,
+          });
+        } else {
+          await inventoryService.addVariant(centerId, {
+            id: v.id || `var-${Date.now()}-${i}-${Math.random().toString(36).substr(2, 5)}`,
+            itemId,
+            name: v.name,
+            multiplier: mult,
+            packageSize: mult,
+            purchasePrice: v.purchasePrice,
+            pricingMode: v.pricingMode || 'manual',
+            profitMargin: v.profitMargin || 0,
+            sellingPrice: v.sellingPrice,
+            barcode: v.barcode || '',
+            sku: v.sku || itemData.sku,
+            isDefault: v.isDefault,
+            isActive: v.isActive,
+          });
+        }
+      }
+    } else {
+      // Add new item
+      const isOnline = typeof window !== 'undefined' && navigator.onLine;
+      itemId = `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+      const newItem = {
+        ...itemData,
+        stockUnit: itemData.stockUnit || itemData.baseUnit,
+        stockInBaseUnit: itemData.stockInBaseUnit || 0
+      };
+
+      if (isOnline) {
+        try {
+          const ref = doc(inventoryService.getCollectionRef(centerId), itemId);
+          await setDoc(ref, {
+            ...newItem,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+
+          await offlineDb.inventoryItems.put({
+            id: itemId,
+            ...newItem,
+            centerId,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            pendingSync: 0,
+            isDeleted: 0,
+            localUpdatedAt: Date.now()
+          });
+        } catch (err) {
+          console.warn("Failed to save item online, writing offline:", err);
+          await offlineDb.inventoryItems.put({
+            id: itemId,
+            ...newItem,
+            centerId,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            pendingSync: 1,
+            isDeleted: 0,
+            localUpdatedAt: Date.now()
+          });
+        }
+      } else {
+        await offlineDb.inventoryItems.put({
+          id: itemId,
+          ...newItem,
+          centerId,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          pendingSync: 1,
+          isDeleted: 0,
+          localUpdatedAt: Date.now()
+        });
+      }
+
+      // Add all variants for the new item
+      for (let i = 0; i < variants.length; i++) {
+        const v = variants[i];
+        const mult = Number(v.multiplier || v.packageSize || 1);
+        await inventoryService.addVariant(centerId, {
+          id: v.id || `var-${Date.now()}-${i}-${Math.random().toString(36).substr(2, 5)}`,
+          itemId,
+          name: v.name,
+          multiplier: mult,
+          packageSize: mult,
+          purchasePrice: v.purchasePrice,
+          pricingMode: v.pricingMode || 'manual',
+          profitMargin: v.profitMargin || 0,
+          sellingPrice: v.sellingPrice,
+          barcode: v.barcode || '',
+          sku: v.sku || itemData.sku,
+          isDefault: v.isDefault,
+          isActive: v.isActive,
+        });
+      }
+    }
+
+    return itemId;
   },
 
   // Stock Adjustments

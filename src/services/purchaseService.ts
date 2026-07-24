@@ -98,7 +98,7 @@ export const purchaseService = {
         itemStocks[item.itemId] = localItem?.stockInBaseUnit || 0;
       }
       const localVariant = await offlineDb.inventoryVariants.get(item.variantId);
-      const packageSize = localVariant?.packageSize || item.packageSizeSnapshot || 1;
+      const packageSize = localVariant?.multiplier || localVariant?.packageSize || item.packageSizeSnapshot || 1;
       const convertedQty = item.quantity * packageSize;
       itemStocks[item.itemId] += convertedQty;
     }
@@ -111,7 +111,7 @@ export const purchaseService = {
       const localItem = await offlineDb.inventoryItems.get(item.itemId);
 
       const prevItemStock = localItem?.stockInBaseUnit || 0;
-      const packageSize = localVariant?.packageSize || item.packageSizeSnapshot || 1;
+      const packageSize = localVariant?.multiplier || localVariant?.packageSize || item.packageSizeSnapshot || 1;
       const convertedQty = item.quantity * packageSize;
       const finalItemStock = itemStocks[item.itemId];
 
@@ -166,7 +166,7 @@ export const purchaseService = {
       if (farmer) {
         const prevBalance = farmer.balance || 0;
         const newBalance = prevBalance + data.grandTotal; // Credit increases balance (we owe the farmer for milk/materials)
-        
+
         farmerUpdate = {
           farmerId: data.supplierId,
           newBalance
@@ -378,7 +378,7 @@ export const purchaseService = {
       const pItems = await purchaseService.getItemsByPurchase(centerId, id);
       for (const item of pItems) {
         const localItem = await offlineDb.inventoryItems.get(item.itemId);
-        
+
         if (localItem) {
           const packageSize = item.packageSizeSnapshot || 1;
           const convertedQty = item.quantity * packageSize;

@@ -27,7 +27,13 @@ export const inventoryItemSchema = z.object({
   barcode: z.string().optional(),
   description: z.string().optional(),
   gst: z.number().min(0, 'GST must be positive').max(100, 'GST cannot exceed 100%'),
-  baseUnit: z.string().min(1, 'Base unit is required'),
+  baseUnit: z.string().min(1, 'Base unit is required'), // Stock Unit
+  stockUnit: z.string().default('KG'), // 3-Tier ERP Stock Unit
+  defaultPurchaseUnit: z.string().default('50 KG Bag'), // Default Purchase Unit (e.g. 50 KG Bag)
+  purchaseUnit: z.string().optional(), // Alias for defaultPurchaseUnit
+  purchaseMultiplier: z.number().default(1), // Purchase Multiplier (e.g. 50)
+  purchasePrice: z.number().default(0), // Single Purchase Price per Purchase Unit
+  averageCostPerBaseUnit: z.number().default(0), // Auto-calculated cost per Stock Unit (purchasePrice / purchaseMultiplier)
   minimumStock: z.number().min(0, 'Minimum stock must be positive'),
   stockInBaseUnit: z.number().default(0),
   maximumStock: z.number().min(0, 'Maximum stock must be positive'),
@@ -39,42 +45,59 @@ export type InventoryItemFormData = z.infer<typeof inventoryItemSchema>;
 
 export interface InventoryItem extends InventoryItemFormData {
   id: string;
+  stockUnit: string;
+  defaultPurchaseUnit: string;
+  purchaseMultiplier: number;
+  purchasePrice: number;
+  averageCostPerBaseUnit: number;
   createdAt: Timestamp | Date;
   updatedAt: Timestamp | Date;
 }
 
 // 2. Variants
 /**
- * InventoryVariant — Packaging Definition Only
+ * InventoryVariant — Packaging Definition & Auto Pricing Only
  *
  * ⚠️  INVARIANT: This type MUST NEVER contain any stock field.
  *
- * Forbidden fields:
- *   stock, currentStock, availableStock, quantity, remaining
+ * Purchase prices are ALWAYS auto-calculated from item purchasePrice / purchaseMultiplier:
+ *   variantPurchaseCost = variant.multiplier * (item.purchasePrice / item.purchaseMultiplier)
  *
- * Available stock is ALWAYS derived at runtime:
- *   availablePackages = Math.floor(item.stockInBaseUnit / variant.packageSize)
- *
- * Allowed fields: packageSize, purchasePrice, sellingPrice, barcode, sku, name,
- *                 itemId, isDefault, isActive, createdAt
- *
- * Rationale: Stock belongs exclusively to InventoryItem.stockInBaseUnit (base unit).
- *            Variants are purely packaging multipliers. Storing stock per-variant
- *            causes double-counting, sync errors, and breaks the conversion formula.
+ * Selling prices are either:
+ *   - Manual: User enters sellingPrice directly
+ *   - Auto: sellingPrice = variantPurchaseCost * (1 + profitMargin / 100)
  */
 
 export interface InventoryVariant {
   id: string;
   itemId: string;
-  name: string;          // e.g., "Bag", "Box", "Carton", "Loose"
-  packageSize: number;   // Conversion multiplier, e.g. 50 (50 KG per Bag)
-  purchasePrice: number;   // Price per variant pack, e.g., 1500
-  sellingPrice: number;    // Selling price per variant pack, e.g., 2000
+  name: string;          // e.g., "50 KG Bag", "25 KG Bag", "1 KG", "500 Gram"
+  multiplier: number;    // Conversion multiplier in Stock Units (e.g. 50, 25, 1, 0.5)
+  packageSize?: number;  // Legacy alias for multiplier
+  purchasePrice: number;   // Auto-calculated read-only purchase cost per variant
+  pricingMode: 'manual' | 'auto'; // Manual selling price or Auto profit margin
+  profitMargin: number;    // Profit margin percentage (e.g. 20 for 20%)
+  sellingPrice: number;    // Selling price per variant pack
   barcode: string;
   sku: string;
   isDefault: boolean;
   isActive: boolean;
   createdAt: Timestamp | Date;
+}
+
+export interface VariantDraftRow {
+  id?: string;
+  name: string;
+  multiplier: number; // Conversion multiplier in Stock Units (e.g., 50, 25, 0.5)
+  packageSize?: number; // Legacy compatibility
+  purchasePrice: number; // Auto-calculated read-only
+  pricingMode: 'manual' | 'auto';
+  profitMargin: number; // Percentage, e.g. 20
+  sellingPrice: number;
+  barcode: string;
+  sku: string;
+  isDefault: boolean;
+  isActive: boolean;
 }
 
 // 3. Suppliers

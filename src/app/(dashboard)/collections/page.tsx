@@ -10,8 +10,8 @@ import { settingsService, GeneralSettings } from '@/services/settingsService';
 import { Collection, Farmer, PrinterSettingsFormData } from '@/types';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Search, MoreHorizontal, Trash, Printer, Milk, Download, Filter, ChevronDown } from 'lucide-react';
-import { format, isToday, isYesterday, parseISO, startOfDay, endOfDay } from 'date-fns';
+import { Plus, Search, MoreHorizontal, Trash, Printer, Milk, Download, Filter, ChevronDown, ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
+import { format, isToday, isYesterday, parseISO, startOfDay, endOfDay, subDays } from 'date-fns';
 import { useReactToPrint } from 'react-to-print';
 import { ThermalReceipt } from '@/components/receipt/ThermalReceipt';
 import { A4Receipt } from '@/components/receipt/A4Receipt';
@@ -39,8 +39,12 @@ export default function CollectionsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [shiftFilter, setShiftFilter] = useState<'all' | 'morning' | 'evening'>('all');
   const [animalFilter, setAnimalFilter] = useState<'all' | 'cow' | 'buffalo'>('all');
-  const [dateFilter, setDateFilter] = useState('');   // YYYY-MM-DD string
+  const [dateFilter, setDateFilter] = useState(() => format(new Date(), 'yyyy-MM-dd'));
   const [isLoading, setIsLoading] = useState(true);
+
+  // Pagination state (Default 10 records per page)
+  const [pageIndex, setPageIndex] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   const receiptRef = useRef<HTMLDivElement>(null);
   const handlePrint = useReactToPrint({
@@ -77,6 +81,11 @@ export default function CollectionsPage() {
     }
   }, [centerId]);
 
+  // Reset pagination to page 1 whenever filters change
+  useEffect(() => {
+    setPageIndex(1);
+  }, [searchTerm, shiftFilter, animalFilter, dateFilter, pageSize]);
+
   const handleDelete = async (id: string) => {
     if (!centerId || !confirm('Delete this collection?')) return;
     try {
@@ -85,6 +94,10 @@ export default function CollectionsPage() {
       load();
     } catch { toast.error('Failed to delete'); }
   };
+
+  // Quick Date Helpers
+  const todayStr = format(new Date(), 'yyyy-MM-dd');
+  const yesterdayStr = format(subDays(new Date(), 1), 'yyyy-MM-dd');
 
   // Filters
   const filtered = collections.filter(c => {
@@ -101,6 +114,10 @@ export default function CollectionsPage() {
     return matchSearch && matchShift && matchAnimal && matchDate;
   });
 
+  // Slice paginated records (10 per page default)
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const paginated = filtered.slice((pageIndex - 1) * pageSize, pageIndex * pageSize);
+
   const totalLiters = filtered.reduce((s, c) => s + c.liters, 0);
   const totalAmt = filtered.reduce((s, c) => s + c.totalAmount, 0);
   const morningCount = filtered.filter(c => c.shift === 'morning').length;
@@ -112,15 +129,49 @@ export default function CollectionsPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         {/* Filters */}
         <div className="flex flex-wrap items-center gap-2">
-          {/* Date */}
-          <input
-            type="date"
-            value={dateFilter}
-            onChange={e => setDateFilter(e.target.value)}
-            className="px-3 py-2 text-[13px] rounded-xl outline-none border border-[#ECECEC] bg-white text-[#555]"
-            style={{ cursor: 'pointer' }}
-          />
-          {/* Shift filter */}
+          {/* Date Picker + Today Quick Filters */}
+          <div className="flex items-center gap-1.5">
+            <input
+              type="date"
+              value={dateFilter}
+              onChange={e => setDateFilter(e.target.value)}
+              className="px-3 py-1.5 text-[13px] rounded-xl outline-none border border-[#ECECEC] bg-white text-[#555] font-semibold"
+              style={{ cursor: 'pointer' }}
+            />
+            <div className="flex rounded-xl p-0.5 border border-[#ECECEC]" style={{ background: '#F7F7F7' }}>
+              <button
+                type="button"
+                onClick={() => setDateFilter(todayStr)}
+                className={`px-3 py-1.5 text-[12px] font-bold rounded-[10px] transition-all ${
+                  dateFilter === todayStr
+                    ? 'bg-[#FF6B00] text-white shadow-sm'
+                    : 'text-[#777] hover:bg-white hover:text-[#FF6B00]'
+                }`}
+              >
+                Today
+              </button>
+              <button
+                type="button"
+                onClick={() => setDateFilter(yesterdayStr)}
+                className={`px-3 py-1.5 text-[12px] font-bold rounded-[10px] transition-all ${
+                  dateFilter === yesterdayStr
+                    ? 'bg-[#FF6B00] text-white shadow-sm'
+                    : 'text-[#777] hover:bg-white hover:text-[#FF6B00]'
+                }`}
+              >
+                Yesterday
+              </button>
+              {dateFilter && (
+                <button
+                  type="button"
+                  onClick={() => setDateFilter('')}
+                  className="px-2.5 py-1.5 text-[12px] font-bold text-gray-500 hover:text-gray-800 transition-all"
+                >
+                  All Dates
+                </button>
+              )}
+            </div>
+          </div>
           {/* Shift filter */}
           <div className="flex rounded-xl p-0.5 border border-[#ECECEC]" style={{ background: '#F7F7F7' }}>
             {(['all', 'morning', 'evening'] as const).map(t => (
@@ -222,7 +273,7 @@ export default function CollectionsPage() {
                     ))}
                   </tr>
                 ))
-              ) : filtered.length === 0 ? (
+              ) : paginated.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="text-center py-16">
                     <div className="flex flex-col items-center gap-3">
@@ -236,7 +287,7 @@ export default function CollectionsPage() {
                 </tr>
               ) : (
                 <AnimatePresence>
-                  {filtered.map((col, i) => {
+                  {paginated.map((col, i) => {
                     let dateStr = 'N/A', timeStr = '';
                     if (col.createdAt) {
                       const d = (col.createdAt as any).toDate ? (col.createdAt as any).toDate() : new Date(col.createdAt as any);
@@ -309,10 +360,62 @@ export default function CollectionsPage() {
             </tbody>
           </table>
         </div>
+
+        {/* Pagination Bar (Default 10 Records Per Page) */}
         {filtered.length > 0 && (
-          <div className="px-6 py-3 border-t border-[#F0F0F0] flex justify-between items-center">
-            <span className="text-[12px] text-[#AAAAAA]">{filtered.length} of {collections.length} records</span>
-            <span className="text-[13px] font-semibold text-[#111111]">Total: <span style={{ color: '#FF6B00' }}>₹{totalAmt.toFixed(2)}</span></span>
+          <div className="px-6 py-3.5 border-t border-[#F0F0F0] flex flex-col sm:flex-row items-center justify-between gap-3 text-[12.5px] font-semibold text-[#666] bg-white">
+            <div className="flex items-center gap-2">
+              <span>Showing</span>
+              <b className="text-[#111]">
+                {Math.min((pageIndex - 1) * pageSize + 1, filtered.length)} - {Math.min(pageIndex * pageSize, filtered.length)}
+              </b>
+              <span>of</span>
+              <b className="text-[#111]">{filtered.length}</b>
+              <span>records</span>
+            </div>
+
+            <div className="flex items-center gap-4">
+              {/* Rows Per Page Selector */}
+              <div className="flex items-center gap-1.5 text-xs text-[#777]">
+                <span>Rows:</span>
+                <select
+                  value={pageSize}
+                  onChange={e => {
+                    setPageSize(Number(e.target.value));
+                    setPageIndex(1);
+                  }}
+                  className="px-2 py-1 bg-[#F7F7F7] border border-[#ECECEC] rounded-lg text-xs font-bold text-[#111] outline-none"
+                >
+                  <option value={10}>10</option>
+                  <option value={20}>20</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
+              </div>
+
+              {/* Prev/Next Buttons */}
+              <div className="flex items-center gap-1.5">
+                <button
+                  disabled={pageIndex <= 1 || isLoading}
+                  onClick={() => setPageIndex(p => Math.max(1, p - 1))}
+                  className="flex items-center gap-1 px-3 py-1.5 border border-[#ECECEC] rounded-xl font-bold hover:bg-gray-50 transition-colors disabled:opacity-40"
+                >
+                  <ChevronLeft size={15} /> Prev
+                </button>
+
+                <span className="px-2 text-xs font-bold text-[#111]">
+                  {pageIndex} / {totalPages}
+                </span>
+
+                <button
+                  disabled={pageIndex >= totalPages || isLoading}
+                  onClick={() => setPageIndex(p => Math.min(totalPages, p + 1))}
+                  className="flex items-center gap-1 px-3 py-1.5 border border-[#ECECEC] rounded-xl font-bold hover:bg-gray-50 transition-colors disabled:opacity-40"
+                >
+                  Next <ChevronRight size={15} />
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </motion.div>

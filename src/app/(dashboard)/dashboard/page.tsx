@@ -339,7 +339,7 @@ export default function DashboardPage() {
               <div className="text-[16px] font-semibold text-[#111111]">Collection Overview</div>
               <div className="text-[12px] text-[#777777] mt-0.5">Weekly liters collected</div>
             </div>
-            <div className="text-[12px] font-medium px-3 py-1.5 rounded-lg" style={{ background: '#F5F5F5', color: '#555' }}>Past 7 Days</div>
+            {/* <div className="text-[12px] font-medium px-3 py-1.5 rounded-lg" style={{ background: '#F5F5F5', color: '#555' }}>Past 7 Days</div> */}
           </div>
           <ResponsiveContainer width="100%" height={220}>
             <AreaChart data={weeklyData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>

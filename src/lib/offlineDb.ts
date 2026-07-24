@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie';
-import { 
+import {
   Collection, RateChart, RateChartEntry, Farmer, LedgerEntry,
   InventoryItem, InventoryVariant, Supplier, PurchaseEntry, PurchaseEntryItem,
   SalesEntry, SalesEntryItem, StockAdjustment, SupplierPayment, InventoryLog,

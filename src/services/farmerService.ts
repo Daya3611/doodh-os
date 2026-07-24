@@ -48,7 +48,7 @@ export const farmerService = {
         );
         const snapshot = await getDocs(q);
         const cloudFarmers = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Farmer));
-        
+
         // Cache in background
         const syncTime = Date.now();
         for (const f of cloudFarmers) {

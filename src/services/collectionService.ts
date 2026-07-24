@@ -22,7 +22,7 @@ export const collectionService = {
         );
         const snapshot = await getDocs(q);
         const cloudCols = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Collection));
-        
+
         // Cache in background
         const syncTime = Date.now();
         for (const c of cloudCols) {
@@ -78,7 +78,7 @@ export const collectionService = {
         );
         const snapshot = await getDocs(q);
         const cloudCols = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Collection));
-        
+
         // Update IndexedDB cache
         const syncTime = Date.now();
         for (const c of cloudCols) {
@@ -119,7 +119,7 @@ export const collectionService = {
     createdBy: string
   ): Promise<string> => {
     const isOnline = typeof window !== 'undefined' && navigator.onLine;
-    
+
     if (isOnline) {
       try {
         const newId = await runTransaction(db, async (tx) => {
@@ -127,7 +127,7 @@ export const collectionService = {
           const farmerRef = doc(db, 'centers', centerId, 'farmers', data.farmerId);
           const farmerDoc = await tx.get(farmerRef);
           if (!farmerDoc.exists()) throw new Error('Farmer not found');
-          
+
           const currentBalance = farmerDoc.data().balance || 0;
           const newBalance = currentBalance + data.totalAmount; // Credit increases balance
 
@@ -246,7 +246,7 @@ export const collectionService = {
     if (isOnline) {
       try {
         const colRef = doc(collectionService.getCollectionRef(centerId), id);
-        
+
         // Find ledger entries to delete
         const ledgerCollectionRef = collection(db, 'centers', centerId, 'ledger');
         const ledgerQuery = query(ledgerCollectionRef, where('farmerId', '==', farmerId));

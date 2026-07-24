@@ -206,6 +206,7 @@ export default function RegisterPage() {
                   <input
                     {...register('email')}
                     type="email"
+                    suppressHydrationWarning
                     className="w-full px-4 py-3 text-[14px] rounded-xl outline-none transition-all bg-[#F7F7F7] border border-[#ECECEC] text-[#111111] focus:border-[#FF6B00]"
                     placeholder="owner@doodhos.com"
                   />
@@ -226,6 +227,7 @@ export default function RegisterPage() {
                     <input
                       {...register('password')}
                       type={showPassword ? 'text' : 'password'}
+                      suppressHydrationWarning
                       className="w-full px-4 py-3 pr-12 text-[14px] rounded-xl outline-none transition-all bg-[#F7F7F7] border border-[#ECECEC] text-[#111111] focus:border-[#FF6B00]"
                       placeholder="••••••••"
                     />

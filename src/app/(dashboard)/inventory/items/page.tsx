@@ -3,14 +3,16 @@
 import React, { useState, useEffect, Fragment } from 'react';
 import { useAuthStore } from '@/store/useAuthStore';
 import { inventoryService } from '@/services/inventoryService';
-import { InventoryItem, InventoryVariant, ItemStatus } from '@/types';
+import { InventoryItem, InventoryVariant, ItemStatus, VariantDraftRow } from '@/types';
+import { getPresetVariantsForUnit } from '@/utils/variantPresets';
 import { toast } from 'sonner';
 import { formatCurrency } from '@/utils/format';
 
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  Plus, Search, Edit3, Trash2, ChevronDown, ChevronUp, 
-  Barcode, Layers, Save, X, Printer, RefreshCw, AlertCircle
+import {
+  Plus, Search, Edit3, Trash2, ChevronDown, ChevronUp,
+  Barcode, Layers, Save, X, Printer, RefreshCw, AlertCircle,
+  Copy, ArrowUp, ArrowDown, Sparkles, Check, ShoppingBag, Box, Percent, Lock, Info
 } from 'lucide-react';
 import { generateBarcodeSVG } from '@/utils/barcodeGenerator';
 
@@ -22,7 +24,7 @@ const cardStyle = {
 };
 
 export default function ItemMasterPage() {
-  const { profile, user } = useAuthStore();
+  const { profile } = useAuthStore();
   const centerId = profile?.centerId;
 
   const [isLoading, setIsLoading] = useState(true);
@@ -40,9 +42,11 @@ export default function ItemMasterPage() {
   const [brands, setBrands] = useState<string[]>([]);
   const [units, setUnits] = useState<string[]>([]);
 
-  // Item Form Modal state
+  // Item Form Modal state (3-Tier ERP Master Form)
   const [isItemModalOpen, setIsItemModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+
   const [itemFormData, setItemFormData] = useState({
     name: '',
     category: '',
@@ -51,7 +55,11 @@ export default function ItemMasterPage() {
     barcode: '',
     description: '',
     gst: 0,
-    baseUnit: '',
+    baseUnit: 'KG', // Stock Unit (smallest inventory unit)
+    stockUnit: 'KG',
+    defaultPurchaseUnit: 'Bag', // Purchase Unit Name (e.g. Bag, Box, Tin)
+    purchaseMultiplier: 50,    // 1 Purchase Unit contains 50 Stock Units
+    purchasePrice: 2600,       // Purchase Price per Purchase Unit
     minimumStock: 5,
     stockInBaseUnit: 0,
     maximumStock: 100,
@@ -59,25 +67,8 @@ export default function ItemMasterPage() {
     image: '',
   });
 
-  // Variant Form Modal state
-  const [isVariantModalOpen, setIsVariantModalOpen] = useState(false);
-  const [variantItemId, setVariantItemId] = useState<string | null>(null);
-  const [editingVariant, setEditingVariant] = useState<InventoryVariant | null>(null);
-  const [variantFormData, setVariantFormData] = useState({
-    name: '',
-    purchasePrice: 0,
-    sellingPrice: 0,
-    /** Opening Quantity (New Variant Only) — transient UI field, never stored on variant. */
-    openingQty: 0,
-    barcode: '',
-    sku: '',
-    packageSize: 1,
-    isDefault: false,
-    isActive: true,
-    parentBaseUnit: 'KG',
-    /** True when this variant has historical purchase/sale/adjustment records. Locks packageSize. */
-    hasTransactions: false,
-  });
+  // Selling Variants state for the form
+  const [variantDrafts, setVariantDrafts] = useState<VariantDraftRow[]>([]);
 
   // Barcode Modal state
   const [barcodeModalText, setBarcodeModalText] = useState<string | null>(null);
@@ -114,12 +105,17 @@ export default function ItemMasterPage() {
     loadData();
   }, [centerId]);
 
-  // Handle auto-generation on form name update
+  // Derived Cost per Stock Unit (Read-only badge: 2600 / 50 = ₹52 per KG)
+  const costPerStockUnit = itemFormData.purchaseMultiplier > 0
+    ? Number((itemFormData.purchasePrice / itemFormData.purchaseMultiplier).toFixed(4))
+    : 0;
+
+  // Handle auto-generation of SKU & Barcode
   const generateSkuAndBarcode = (nameStr: string) => {
     if (!nameStr) return;
     const clean = nameStr.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
     const rand = Math.floor(1000 + Math.random() * 9000);
-    
+
     setItemFormData(prev => ({
       ...prev,
       sku: settings.autoGenerateSku && !prev.sku ? `SKU-${clean}-${rand}` : prev.sku,
@@ -127,27 +123,67 @@ export default function ItemMasterPage() {
     }));
   };
 
+  // Helper to load smart presets for a stock unit
+  const buildPresetsForUnit = (stockUnit: string, skuPrefix: string, basePurchasePrice: number, basePurchaseMult: number) => {
+    const unitCost = basePurchaseMult > 0 ? (basePurchasePrice / basePurchaseMult) : 0;
+    const presets = getPresetVariantsForUnit(stockUnit);
+
+    return presets.map((p, idx) => {
+      const mult = p.multiplier;
+      const purchaseCost = Number((mult * unitCost).toFixed(2));
+      return {
+        name: p.name,
+        multiplier: mult,
+        packageSize: mult,
+        purchasePrice: purchaseCost,
+        pricingMode: 'manual' as const,
+        profitMargin: 20,
+        sellingPrice: purchaseCost > 0 ? Number((purchaseCost * 1.15).toFixed(2)) : 0,
+        barcode: '',
+        sku: `${skuPrefix || 'SKU'}-V${idx + 1}`,
+        isDefault: p.isDefault || idx === 0,
+        isActive: true,
+      };
+    });
+  };
+
   const handleOpenAddModal = () => {
+    const defaultUnit = units[0] || 'KG';
+    const initialSku = '';
+    const initialPurchasePrice = 2600;
+    const initialPurchaseMult = 50;
+    const presets = buildPresetsForUnit(defaultUnit, initialSku, initialPurchasePrice, initialPurchaseMult);
+
     setEditingItem(null);
     setItemFormData({
       name: '',
       category: categories[0] || '',
       brand: brands[0] || '',
-      sku: '',
+      sku: initialSku,
       barcode: '',
       description: '',
       gst: 0,
-      baseUnit: units[0] || 'Piece',
+      baseUnit: defaultUnit,
+      stockUnit: defaultUnit,
+      defaultPurchaseUnit: 'Bag',
+      purchaseMultiplier: initialPurchaseMult,
+      purchasePrice: initialPurchasePrice,
       minimumStock: 5,
       stockInBaseUnit: 0,
       maximumStock: 100,
       status: 'active',
       image: '',
     });
+
+    setVariantDrafts(presets);
     setIsItemModalOpen(true);
   };
 
-  const handleOpenEditModal = (item: InventoryItem) => {
+  const handleOpenEditModal = async (item: InventoryItem) => {
+    const unit = item.stockUnit || item.baseUnit || 'KG';
+    const purchaseMult = item.purchaseMultiplier || 50;
+    const purchasePrice = item.purchasePrice || 0;
+
     setEditingItem(item);
     setItemFormData({
       name: item.name,
@@ -157,356 +193,421 @@ export default function ItemMasterPage() {
       barcode: item.barcode || '',
       description: item.description || '',
       gst: item.gst,
-      baseUnit: item.baseUnit,
+      baseUnit: unit,
+      stockUnit: unit,
+      defaultPurchaseUnit: item.defaultPurchaseUnit || 'Bag',
+      purchaseMultiplier: purchaseMult,
+      purchasePrice,
       minimumStock: item.minimumStock,
       stockInBaseUnit: item.stockInBaseUnit || 0,
       maximumStock: item.maximumStock,
       status: item.status,
       image: item.image || '',
     });
+
+    if (centerId) {
+      const existingVariants = await inventoryService.getVariants(centerId, item.id);
+      if (existingVariants.length > 0) {
+        const unitCost = purchaseMult > 0 ? (purchasePrice / purchaseMult) : 0;
+        setVariantDrafts(existingVariants.map(v => {
+          const mult = v.multiplier || v.packageSize || 1;
+          const purchaseCost = Number((mult * unitCost).toFixed(2));
+          const mode = v.pricingMode || 'manual';
+          const margin = v.profitMargin || 20;
+          const sellPrice = mode === 'auto' && purchaseCost > 0
+            ? Number((purchaseCost * (1 + margin / 100)).toFixed(2))
+            : v.sellingPrice;
+
+          return {
+            id: v.id,
+            name: v.name,
+            multiplier: mult,
+            packageSize: mult,
+            purchasePrice: purchaseCost,
+            pricingMode: mode,
+            profitMargin: margin,
+            sellingPrice: sellPrice,
+            barcode: v.barcode,
+            sku: v.sku,
+            isDefault: v.isDefault,
+            isActive: v.isActive,
+          };
+        }));
+      } else {
+        setVariantDrafts(buildPresetsForUnit(unit, item.sku, purchasePrice, purchaseMult));
+      }
+    }
     setIsItemModalOpen(true);
   };
 
+  // Auto-recalculate variant purchase costs and auto-selling prices when purchase parameters change
+  const updatePurchasePricing = (newPurchasePrice: number, newPurchaseMultiplier: number) => {
+    const unitCost = newPurchaseMultiplier > 0 ? (newPurchasePrice / newPurchaseMultiplier) : 0;
+    setVariantDrafts(prev => prev.map(v => {
+      const purchaseCost = Number((v.multiplier * unitCost).toFixed(2));
+      const sellPrice = v.pricingMode === 'auto'
+        ? Number((purchaseCost * (1 + (v.profitMargin || 0) / 100)).toFixed(2))
+        : v.sellingPrice;
+      return {
+        ...v,
+        purchasePrice: purchaseCost,
+        sellingPrice: sellPrice,
+      };
+    }));
+  };
+
+  // When Stock Unit changes, option to suggest presets
+  const handleStockUnitChange = (newUnit: string) => {
+    const presets = buildPresetsForUnit(newUnit, itemFormData.sku, itemFormData.purchasePrice, itemFormData.purchaseMultiplier);
+    setItemFormData(prev => ({
+      ...prev,
+      baseUnit: newUnit,
+      stockUnit: newUnit,
+    }));
+
+    if (variantDrafts.length === 0 || variantDrafts.every(v => v.sellingPrice === 0)) {
+      setVariantDrafts(presets);
+    }
+  };
+
+  const handleApplyPresetVariants = () => {
+    const presets = buildPresetsForUnit(itemFormData.stockUnit, itemFormData.sku, itemFormData.purchasePrice, itemFormData.purchaseMultiplier);
+    setVariantDrafts(presets);
+    toast.success(`Applied preset selling variants for ${itemFormData.stockUnit}`);
+  };
+
+  // Row handlers for selling variants
+  const handleAddVariantRow = () => {
+    const isFirst = variantDrafts.length === 0;
+    const nextIdx = variantDrafts.length + 1;
+    const unitCost = itemFormData.purchaseMultiplier > 0 ? (itemFormData.purchasePrice / itemFormData.purchaseMultiplier) : 0;
+    const mult = 1;
+    const purchaseCost = Number((mult * unitCost).toFixed(2));
+
+    setVariantDrafts(prev => [
+      ...prev,
+      {
+        name: '',
+        multiplier: mult,
+        packageSize: mult,
+        purchasePrice: purchaseCost,
+        pricingMode: 'manual',
+        profitMargin: 20,
+        sellingPrice: 0,
+        barcode: '',
+        sku: `${itemFormData.sku || 'SKU'}-V${nextIdx}`,
+        isDefault: isFirst,
+        isActive: true,
+      }
+    ]);
+  };
+
+  const handleUpdateVariantRow = (index: number, field: keyof VariantDraftRow, value: any) => {
+    const unitCost = itemFormData.purchaseMultiplier > 0 ? (itemFormData.purchasePrice / itemFormData.purchaseMultiplier) : 0;
+
+    setVariantDrafts(prev => prev.map((row, idx) => {
+      if (idx !== index) return row;
+      const updated = { ...row, [field]: value };
+
+      if (field === 'multiplier') {
+        const mult = Number(value) || 0;
+        updated.packageSize = mult;
+        updated.purchasePrice = Number((mult * unitCost).toFixed(2));
+        if (updated.pricingMode === 'auto') {
+          updated.sellingPrice = Number((updated.purchasePrice * (1 + (updated.profitMargin || 0) / 100)).toFixed(2));
+        }
+      }
+
+      if (field === 'pricingMode') {
+        if (value === 'auto') {
+          updated.sellingPrice = Number((updated.purchasePrice * (1 + (updated.profitMargin || 0) / 100)).toFixed(2));
+        }
+      }
+
+      if (field === 'profitMargin') {
+        const margin = Number(value) || 0;
+        if (updated.pricingMode === 'auto') {
+          updated.sellingPrice = Number((updated.purchasePrice * (1 + margin / 100)).toFixed(2));
+        }
+      }
+
+      return updated;
+    }));
+  };
+
+  const handleSetDefaultVariant = (index: number) => {
+    setVariantDrafts(prev => prev.map((row, idx) => ({
+      ...row,
+      isDefault: idx === index,
+    })));
+  };
+
+  const handleDuplicateVariantRow = (index: number) => {
+    const target = variantDrafts[index];
+    if (!target) return;
+    const duplicated: VariantDraftRow = {
+      ...target,
+      id: undefined,
+      name: target.name ? `${target.name} (Copy)` : 'Copy',
+      sku: `${target.sku}-COPY`,
+      isDefault: false,
+    };
+    const updated = [...variantDrafts];
+    updated.splice(index + 1, 0, duplicated);
+    setVariantDrafts(updated);
+  };
+
+  const handleDeleteVariantRow = (index: number) => {
+    if (variantDrafts.length <= 1) {
+      toast.error('Product must have at least one selling variant');
+      return;
+    }
+    const wasDefault = variantDrafts[index].isDefault;
+    const updated = variantDrafts.filter((_, idx) => idx !== index);
+    if (wasDefault && updated.length > 0) {
+      updated[0].isDefault = true;
+    }
+    setVariantDrafts(updated);
+  };
+
+  const handleReorderVariantRow = (index: number, direction: 'up' | 'down') => {
+    const newIdx = direction === 'up' ? index - 1 : index + 1;
+    if (newIdx < 0 || newIdx >= variantDrafts.length) return;
+    const updated = [...variantDrafts];
+    const temp = updated[index];
+    updated[index] = updated[newIdx];
+    updated[newIdx] = temp;
+    setVariantDrafts(updated);
+  };
+
+  // Form Submit Handler with Strict Validations
   const handleSaveItem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!centerId) return;
 
-    if (!itemFormData.name || !itemFormData.category || !itemFormData.brand || !itemFormData.sku) {
-      toast.error('Please fill all mandatory fields');
+    // 1. Mandatory Basic Fields
+    if (!itemFormData.name || !itemFormData.category || !itemFormData.brand || !itemFormData.sku || !itemFormData.stockUnit) {
+      toast.error('Please fill all mandatory basic information fields');
       return;
     }
 
-    try {
-      if (editingItem) {
-        await inventoryService.update(centerId, editingItem.id, itemFormData);
-        toast.success('Item updated successfully');
-      } else {
-        await inventoryService.add(centerId, itemFormData);
-        toast.success('Item created successfully');
+    // 2. Purchase Settings Validations
+    if (!itemFormData.defaultPurchaseUnit) {
+      toast.error('Purchase Unit Name (e.g. Bag) is required');
+      return;
+    }
+    if (Number(itemFormData.purchaseMultiplier) <= 0) {
+      toast.error(`Contains Quantity in ${itemFormData.stockUnit} must be greater than 0`);
+      return;
+    }
+
+    // 3. Selling Variants Validations
+    if (variantDrafts.length === 0) {
+      toast.error('At least one selling variant is required');
+      return;
+    }
+
+    // Check empty variant names
+    for (let i = 0; i < variantDrafts.length; i++) {
+      if (!variantDrafts[i].name.trim()) {
+        toast.error(`Variant #${i + 1} name cannot be empty`);
+        return;
       }
+    }
+
+    // Prevent duplicate variant names
+    const names = variantDrafts.map(v => v.name.trim().toLowerCase());
+    const duplicateName = names.find((name, idx) => names.indexOf(name) !== idx);
+    if (duplicateName) {
+      toast.error(`Duplicate variant name "${duplicateName}" is not allowed`);
+      return;
+    }
+
+    // Multiplier > 0 & Selling Price >= 0
+    for (let i = 0; i < variantDrafts.length; i++) {
+      const mult = Number(variantDrafts[i].multiplier || variantDrafts[i].packageSize || 0);
+      if (mult <= 0) {
+        toast.error(`Variant "${variantDrafts[i].name}" quantity must be greater than 0`);
+        return;
+      }
+      if (Number(variantDrafts[i].sellingPrice) < 0) {
+        toast.error(`Selling price for variant "${variantDrafts[i].name}" cannot be negative`);
+        return;
+      }
+    }
+
+    // One and only one default variant
+    const defaultCount = variantDrafts.filter(v => v.isDefault).length;
+    let finalVariants = [...variantDrafts];
+    if (defaultCount === 0) {
+      finalVariants[0].isDefault = true;
+    } else if (defaultCount > 1) {
+      toast.error('Please mark exactly one variant as Default');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      await inventoryService.saveItemWithVariants(
+        centerId,
+        {
+          ...itemFormData,
+          baseUnit: itemFormData.stockUnit,
+          averageCostPerBaseUnit: costPerStockUnit,
+        },
+        finalVariants,
+        editingItem?.id
+      );
+
+      toast.success(editingItem ? 'Product and packaging variants updated!' : 'Product created with 3-tier unit settings!');
       setIsItemModalOpen(false);
       loadData();
     } catch (err: any) {
-      toast.error(err.message || 'Failed to save item');
+      toast.error(err.message || 'Failed to save product');
+    } finally {
+      setIsSaving(false);
     }
   };
 
   const handleDeleteItem = async (itemId: string) => {
     if (!centerId) return;
-    if (!confirm('Are you sure you want to delete this item? All associated variants will be removed.')) return;
+    if (!confirm('Are you sure you want to delete this product? All associated selling variants will be permanently removed.')) return;
 
     try {
       await inventoryService.delete(centerId, itemId);
-      toast.success('Item deleted');
+      toast.success('Product deleted');
       loadData();
     } catch {
       toast.error('Failed to delete item');
     }
   };
 
-  // Variants management
-  const [itemVariants, setItemVariants] = useState<InventoryVariant[]>([]);
-  
+  // Item List Variants row expansion
+  const [itemVariantsMap, setItemVariantsMap] = useState<Record<string, InventoryVariant[]>>({});
+
   const loadVariants = async (itemId: string) => {
     if (!centerId) return;
     const data = await inventoryService.getVariants(centerId, itemId);
-    setItemVariants(data);
+    setItemVariantsMap(prev => ({ ...prev, [itemId]: data }));
   };
 
   const handleToggleRow = (itemId: string) => {
     if (expandedItemId === itemId) {
       setExpandedItemId(null);
-      setItemVariants([]);
     } else {
       setExpandedItemId(itemId);
       loadVariants(itemId);
     }
   };
 
-  // Smart base unit defaults based on the item's own unit
-  const inferConversionUnit = (itemUnit: string): string => {
-    const u = (itemUnit || '').toLowerCase();
-    if (['bag', 'packet', 'bottle', 'box', 'can', 'piece'].includes(u)) return 'KG';
-    if (['litre', 'l'].includes(u)) return 'ML';
-    return itemUnit || 'KG';
-  };
-
-  const handleOpenAddVariant = (item: InventoryItem) => {
-    setVariantItemId(item.id);
-    setEditingVariant(null);
-    // Auto-assign isDefault if this item has no variants yet
-    const autoDefault = itemVariants.length === 0;
-    setVariantFormData({
-      name: '',
-      purchasePrice: 0,
-      sellingPrice: 0,
-      openingQty: 0,
-      barcode: '',
-      sku: `${item.sku}-V${Math.floor(10 + Math.random() * 90)}`,
-      packageSize: 1,
-      isDefault: autoDefault,
-      isActive: true,
-      parentBaseUnit: item.baseUnit || 'KG',
-      hasTransactions: false,
-    });
-    setIsVariantModalOpen(true);
-  };
-
-  const handleOpenEditVariant = async (variant: InventoryVariant) => {
-    setVariantItemId(variant.itemId);
-    setEditingVariant(variant);
-    const parentItem = items.find(i => i.id === variant.itemId);
-    // Check if this variant has historical transactions — if so, packageSize must be locked
-    let hasTxns = false;
-    if (centerId) {
-      try { hasTxns = await inventoryService.variantHasTransactions(centerId, variant.id); } catch {}
-    }
-    setVariantFormData({
-      name: variant.name,
-      purchasePrice: variant.purchasePrice,
-      sellingPrice: variant.sellingPrice,
-      openingQty: 0, // Not used when editing; field is hidden
-      barcode: variant.barcode,
-      sku: variant.sku,
-      packageSize: variant.packageSize || 1,
-      isDefault: variant.isDefault || false,
-      isActive: variant.isActive !== false,
-      parentBaseUnit: parentItem?.baseUnit || 'KG',
-      hasTransactions: hasTxns,
-    });
-    setIsVariantModalOpen(true);
-  };
-
-  const handleSaveVariant = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!centerId || !variantItemId) return;
-
-    const name = variantFormData.name.trim();
-    const { sku, purchasePrice, sellingPrice, packageSize, parentBaseUnit, isDefault, openingQty } = variantFormData;
-
-    // === Validation ===
-    if (!name) { toast.error('Variant name is required'); return; }
-    if (!sku) { toast.error('Variant SKU is required'); return; }
-    if (packageSize <= 0) { toast.error('Package size must be greater than 0'); return; }
-    if (purchasePrice < 0) { toast.error('Purchase price cannot be negative'); return; }
-    if (sellingPrice < 0) { toast.error('Selling price cannot be negative'); return; }
-
-    // Duplicate name check
-    const isDuplicate = itemVariants.some(
-      v => v.id !== editingVariant?.id && v.name.trim().toLowerCase() === name.toLowerCase()
-    );
-    if (isDuplicate) { toast.error(`A variant named "${name}" already exists on this item`); return; }
-
-    // Base unit name collision check (only reject for non-default variants)
-    if (name.toLowerCase() === parentBaseUnit.toLowerCase() && !isDefault) {
-      toast.error(`Variant name cannot match the base unit "${parentBaseUnit}" unless it is marked as the default variant`);
-      return;
-    }
-
-    try {
-      if (editingVariant) {
-        await inventoryService.updateVariant(centerId, editingVariant.id, {
-          name,
-          purchasePrice,
-          sellingPrice,
-          barcode: variantFormData.barcode,
-          sku,
-          // packageSize is NOT updated here if hasTransactions — UI already disables the field
-          packageSize: variantFormData.hasTransactions ? editingVariant.packageSize : packageSize,
-          isDefault,
-          isActive: variantFormData.isActive
-        });
-        // Enforce single-default if this was promoted
-        if (isDefault && !editingVariant.isDefault) {
-          await inventoryService.setDefaultVariant(centerId, editingVariant.id, variantItemId);
-        }
-        toast.success('Variant updated');
-      } else {
-        const addedVarId = await inventoryService.addVariant(centerId, {
-          itemId: variantItemId,
-          name,
-          purchasePrice,
-          sellingPrice,
-          barcode: variantFormData.barcode,
-          sku,
-          packageSize,
-          isDefault,
-          isActive: variantFormData.isActive
-        });
-
-        // Enforce single-default if new variant is the default
-        if (isDefault) {
-          await inventoryService.setDefaultVariant(centerId, addedVarId, variantItemId);
-        }
-
-        // Apply opening stock to parent item if specified
-        if (openingQty > 0) {
-          const parentItem = items.find(i => i.id === variantItemId);
-          if (parentItem) {
-            const addedStock = openingQty * packageSize;
-            await inventoryService.update(centerId, variantItemId, {
-              stockInBaseUnit: (parentItem.stockInBaseUnit || 0) + addedStock
-            });
-            await inventoryService.addAdjustment(centerId, {
-              itemId: variantItemId,
-              itemName: parentItem.name,
-              variantId: addedVarId,
-              variantName: name,
-              quantity: openingQty,
-              packageSizeSnapshot: packageSize,
-              reason: 'opening_balance',
-              notes: 'Added via new variant opening quantity'
-            }, user?.email || 'admin');
-          }
-        }
-        toast.success('Variant added');
-      }
-      setIsVariantModalOpen(false);
-      loadVariants(variantItemId);
-      loadData();
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to save variant');
+  // Barcode Printer
+  const handlePrintBarcode = () => {
+    const content = document.getElementById('printable-barcode-area')?.innerHTML;
+    if (!content) return;
+    const win = window.open('', '', 'width=400,height=300');
+    if (win) {
+      win.document.write(`<html><head><title>Print Barcode</title></head><body style="display:flex;justify-content:center;align-items:center;height:100vh;">${content}</body></html>`);
+      win.document.close();
+      win.print();
     }
   };
 
-  const handleDeleteVariant = async (v: InventoryVariant) => {
-    if (!centerId) return;
-
-    // Guard: cannot delete the only variant
-    if (itemVariants.length <= 1) {
-      toast.error('Cannot delete the only variant on this item');
-      return;
-    }
-    // Guard: cannot delete the default variant unless another is promoted first
-    if (v.isDefault) {
-      toast.error('Promote another variant to Default before deleting this one');
-      return;
-    }
-
-    if (!confirm('Delete this variant?')) return;
-
-    try {
-      await inventoryService.deleteVariant(centerId, v.id);
-      toast.success('Variant removed');
-      loadVariants(v.itemId);
-      loadData();
-    } catch {
-      toast.error('Failed to remove variant');
-    }
-  };
-
-  const handlePromoteDefault = async (v: InventoryVariant) => {
-    if (!centerId) return;
-    try {
-      await inventoryService.setDefaultVariant(centerId, v.id, v.itemId);
-      toast.success(`"${v.name}" is now the default variant`);
-      loadVariants(v.itemId);
-    } catch {
-      toast.error('Failed to set default variant');
-    }
-  };
-
-  // Searching logic
+  // Filter items
   const filteredItems = items.filter(item => {
-    const term = searchTerm.toLowerCase();
-    const matchSearch = 
-      item.name.toLowerCase().includes(term) ||
-      item.sku.toLowerCase().includes(term) ||
-      (item.barcode && item.barcode.toLowerCase().includes(term)) ||
-      item.category.toLowerCase().includes(term) ||
-      item.brand.toLowerCase().includes(term);
+    const matchesSearch =
+      item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      item.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (item.barcode && item.barcode.toLowerCase().includes(searchTerm.toLowerCase()));
 
-    const matchCategory = categoryFilter ? item.category === categoryFilter : true;
-    const matchBrand = brandFilter ? item.brand === brandFilter : true;
-    const matchStatus = statusFilter ? item.status === statusFilter : true;
+    const matchesCat = !categoryFilter || item.category === categoryFilter;
+    const matchesBrand = !brandFilter || item.brand === brandFilter;
+    const matchesStatus = !statusFilter || item.status === statusFilter;
 
-    return matchSearch && matchCategory && matchBrand && matchStatus;
+    return matchesSearch && matchesCat && matchesBrand && matchesStatus;
   });
 
-  const handlePrintBarcode = () => {
-    const printContent = document.getElementById('printable-barcode-area');
-    if (!printContent) return;
-    const win = window.open('', '', 'width=600,height=400');
-    if (win) {
-      win.document.write('<html><head><title>Print Barcode</title><style>body { display: flex; flex-direction: column; justify-content: center; align-items: center; margin: 0; padding: 20px; font-family: monospace; }</style></head><body>');
-      win.document.write(printContent.innerHTML);
-      win.document.write('</body></html>');
-      win.document.close();
-      win.focus();
-      win.print();
-      win.close();
-    }
-  };
-
   return (
-    <div className="space-y-5">
-      {/* 1. Controls Header */}
-      <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
-        <h2 className="text-[18px] font-extrabold text-[#111111] uppercase tracking-wide">Item Master Catalog</h2>
+    <div className="p-6 max-w-7xl mx-auto space-y-6">
+
+      {/* 1. Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-[24px] font-extrabold text-[#111111] tracking-tight">Inventory Items & Catalog</h1>
+          <p className="text-[13px] text-[#777777] mt-0.5">
+            Professional ERP Unit Conversion & Automatic Variant Costing (Marg ERP / Tally Standard)
+          </p>
+        </div>
         <button
           onClick={handleOpenAddModal}
-          className="flex items-center gap-2 px-5 py-3 bg-[#FF6B00] text-white text-[13px] font-bold rounded-xl hover:bg-orange-600 transition-colors shadow-sm cursor-pointer"
+          className="flex items-center justify-center gap-2 px-5 py-3 bg-[#FF6B00] hover:bg-orange-600 text-white rounded-2xl font-bold text-[13.5px] transition-all shadow-[0_4px_14px_rgba(255,107,0,0.35)]"
         >
-          <Plus size={16} /> Add New Item
+          <Plus size={16} /> Create Product
         </button>
       </div>
 
-      {/* 2. Filters Grid */}
-      <div style={cardStyle} className="p-5 grid grid-cols-1 sm:grid-cols-4 gap-4 items-center">
-        {/* Search */}
-        <div className="relative">
-          <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#BBBBBB]" />
+      {/* 2. Search & Filters Bar */}
+      <div style={cardStyle} className="p-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="relative flex-1 min-w-[240px]">
+          <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#AAAAAA]" />
           <input
-            className="w-full pl-9 pr-4 py-2.5 text-[12px] rounded-xl bg-[#F7F7F7] border border-[#ECECEC] outline-none focus:border-[#FF6B00] font-semibold text-[#111]"
-            placeholder="Search by name, SKU, Barcode..."
+            type="text"
+            placeholder="Search by product name, SKU, or barcode..."
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
+            className="w-full pl-10 pr-4 py-2.5 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[13px] font-semibold text-[#111111] outline-none focus:border-[#FF6B00]"
           />
         </div>
 
-        {/* Category */}
-        <select
-          className="w-full px-3 py-2.5 text-[12px] rounded-xl bg-[#F7F7F7] border border-[#ECECEC] outline-none font-semibold text-[#555] cursor-pointer"
-          value={categoryFilter}
-          onChange={e => setCategoryFilter(e.target.value)}
-        >
-          <option value="">All Categories</option>
-          {categories.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={categoryFilter}
+            onChange={e => setCategoryFilter(e.target.value)}
+            className="px-3 py-2.5 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[12.5px] font-semibold text-[#555] outline-none"
+          >
+            <option value="">All Categories</option>
+            {categories.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
 
-        {/* Brand */}
-        <select
-          className="w-full px-3 py-2.5 text-[12px] rounded-xl bg-[#F7F7F7] border border-[#ECECEC] outline-none font-semibold text-[#555] cursor-pointer"
-          value={brandFilter}
-          onChange={e => setBrandFilter(e.target.value)}
-        >
-          <option value="">All Brands</option>
-          {brands.map(b => <option key={b} value={b}>{b}</option>)}
-        </select>
+          <select
+            value={brandFilter}
+            onChange={e => setBrandFilter(e.target.value)}
+            className="px-3 py-2.5 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[12.5px] font-semibold text-[#555] outline-none"
+          >
+            <option value="">All Brands</option>
+            {brands.map(b => <option key={b} value={b}>{b}</option>)}
+          </select>
 
-        {/* Status */}
-        <select
-          className="w-full px-3 py-2.5 text-[12px] rounded-xl bg-[#F7F7F7] border border-[#ECECEC] outline-none font-semibold text-[#555] cursor-pointer"
-          value={statusFilter}
-          onChange={e => setStatusFilter(e.target.value)}
-        >
-          <option value="">All Statuses</option>
-          <option value="active">Active</option>
-          <option value="inactive">Inactive</option>
-        </select>
+          <select
+            value={statusFilter}
+            onChange={e => setStatusFilter(e.target.value)}
+            className="px-3 py-2.5 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[12.5px] font-semibold text-[#555] outline-none"
+          >
+            <option value="">All Status</option>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </select>
+
+          <button
+            onClick={loadData}
+            title="Refresh list"
+            className="p-2.5 border border-[#ECECEC] bg-[#F7F7F7] rounded-xl text-[#555] hover:bg-gray-100 transition-colors"
+          >
+            <RefreshCw size={15} />
+          </button>
+        </div>
       </div>
 
-      {/* 3. Items Table */}
+      {/* 3. Items Master Table */}
       <div style={cardStyle} className="overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left" style={{ borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ background: '#FAFAFA', borderBottom: '1px solid #ECECEC' }}>
                 <th className="p-4 text-[10px] uppercase font-bold text-[#999] tracking-wider"></th>
-                <th className="p-4 text-[10px] uppercase font-bold text-[#999] tracking-wider">Item Details</th>
-                <th className="p-4 text-[10px] uppercase font-bold text-[#999] tracking-wider">Category</th>
-                <th className="p-4 text-[10px] uppercase font-bold text-[#999] tracking-wider">Brand</th>
-                <th className="p-4 text-[10px] uppercase font-bold text-[#999] tracking-wider text-right">Available Stock</th>
+                <th className="p-4 text-[10px] uppercase font-bold text-[#999] tracking-wider">Product & Details</th>
+                <th className="p-4 text-[10px] uppercase font-bold text-[#999] tracking-wider">Category / Brand</th>
+                <th className="p-4 text-[10px] uppercase font-bold text-[#999] tracking-wider">Purchase Config</th>
+                <th className="p-4 text-[10px] uppercase font-bold text-[#999] tracking-wider text-right">Physical Stock</th>
                 <th className="p-4 text-[10px] uppercase font-bold text-[#999] tracking-wider text-center">Status</th>
                 <th className="p-4 text-[10px] uppercase font-bold text-[#999] tracking-wider text-center">Actions</th>
               </tr>
@@ -524,13 +625,17 @@ export default function ItemMasterPage() {
                 <tr>
                   <td colSpan={7} className="p-12 text-center text-[#AAAAAA] text-[13px]">
                     <AlertCircle size={32} className="mx-auto opacity-40 mb-2" />
-                    No inventory items found. Add items to catalog.
+                    No inventory items found. Click 'Create Product' above.
                   </td>
                 </tr>
               ) : (
-                 filteredItems.map(item => {
+                filteredItems.map(item => {
                   const isExpanded = expandedItemId === item.id;
                   const isLowStock = item.stockInBaseUnit <= item.minimumStock;
+                  const stockUnit = item.stockUnit || item.baseUnit || 'KG';
+                  const variants = itemVariantsMap[item.id] || [];
+                  const unitCost = item.averageCostPerBaseUnit || (item.purchaseMultiplier > 0 ? Number((item.purchasePrice / item.purchaseMultiplier).toFixed(2)) : 0);
+
                   return (
                     <React.Fragment key={item.id}>
                       <tr className="border-b border-[#F7F7F7] hover:bg-[#FAFAFA] transition-colors">
@@ -555,11 +660,24 @@ export default function ItemMasterPage() {
                             </div>
                           </div>
                         </td>
-                        <td className="p-4 text-[13px] text-[#555] font-semibold">{item.category}</td>
-                        <td className="p-4 text-[13px] text-[#555] font-semibold">{item.brand}</td>
+                        <td className="p-4 text-[13px] text-[#555] font-semibold">
+                          <div>{item.category}</div>
+                          <div className="text-[11px] text-[#999] font-normal">{item.brand}</div>
+                        </td>
+                        <td className="p-4 text-[12.5px] text-[#555]">
+                          <div>
+                            <span className="font-extrabold text-[#111]">₹{formatCurrency(item.purchasePrice)}</span>
+                            <span className="text-[11px] text-[#777] font-semibold ml-1">
+                              / {item.defaultPurchaseUnit || 'Bag'} ({item.purchaseMultiplier || 1} {stockUnit})
+                            </span>
+                          </div>
+                          <div className="text-[10.5px] text-blue-600 font-bold mt-0.5">
+                            Cost: ₹{unitCost}/{stockUnit}
+                          </div>
+                        </td>
                         <td className="p-4 text-right">
-                          <div className="font-extrabold text-[14px]">
-                            {item.stockInBaseUnit} {item.baseUnit}
+                          <div className="font-extrabold text-[14px] text-[#111]">
+                            {item.stockInBaseUnit} {stockUnit}
                           </div>
                           {isLowStock && (
                             <span className="text-[9px] bg-orange-50 text-orange-600 font-extrabold border border-orange-200 px-1.5 py-0.5 rounded uppercase mt-1 inline-block">
@@ -568,7 +686,7 @@ export default function ItemMasterPage() {
                           )}
                         </td>
                         <td className="p-4 text-center">
-                          <span 
+                          <span
                             className="text-[10px] font-extrabold px-2 py-0.5 rounded-lg border uppercase"
                             style={item.status === 'active' ? { background: '#DCFCE7', color: '#16A34A', borderColor: '#BBF7D0' } : { background: '#FEE2E2', color: '#DC2626', borderColor: '#FECACA' }}
                           >
@@ -578,22 +696,15 @@ export default function ItemMasterPage() {
                         <td className="p-4 text-center">
                           <div className="flex items-center justify-center gap-1">
                             <button
-                              onClick={() => handleOpenAddVariant(item)}
-                              title="Add Variant"
-                              className="p-2 text-blue-600 hover:bg-blue-50 rounded-xl transition-colors"
-                            >
-                              <Layers size={14} />
-                            </button>
-                            <button
                               onClick={() => handleOpenEditModal(item)}
-                              title="Edit"
-                              className="p-2 text-[#FF6B00] hover:bg-[#FFF0E6] rounded-xl transition-colors"
+                              title="Edit Product & Unit Conversion Master"
+                              className="p-2 text-[#FF6B00] hover:bg-[#FFF0E6] rounded-xl transition-colors flex items-center gap-1 text-[12px] font-bold"
                             >
-                              <Edit3 size={14} />
+                              <Edit3 size={14} /> Edit
                             </button>
                             <button
                               onClick={() => handleDeleteItem(item.id)}
-                              title="Delete"
+                              title="Delete Product"
                               className="p-2 text-red-600 hover:bg-red-50 rounded-xl transition-colors"
                             >
                               <Trash2 size={14} />
@@ -602,7 +713,7 @@ export default function ItemMasterPage() {
                         </td>
                       </tr>
 
-                      {/* Expandable Variants Row */}
+                      {/* Expandable Selling Variants & Dynamic Stock Breakdown */}
                       <AnimatePresence>
                         {isExpanded && (
                           <tr>
@@ -614,89 +725,66 @@ export default function ItemMasterPage() {
                                 className="space-y-3"
                               >
                                 <div className="flex items-center justify-between border-b border-[#EBEBEB] pb-2">
-                                  <h4 className="text-[12px] font-extrabold text-[#555] uppercase tracking-wider">Product Variants</h4>
+                                  <h4 className="text-[12px] font-extrabold text-[#555] uppercase tracking-wider flex items-center gap-1.5">
+                                    <Layers size={14} className="text-[#FF6B00]" /> Selling Units & Calculated Stock Packs
+                                  </h4>
                                   <button
-                                    onClick={() => handleOpenAddVariant(item)}
-                                    className="text-[11px] font-bold text-blue-600 hover:underline flex items-center gap-1"
+                                    onClick={() => handleOpenEditModal(item)}
+                                    className="text-[11px] font-bold text-[#FF6B00] hover:underline"
                                   >
-                                    <Plus size={12} /> Add Variant
+                                    Manage Pricing in Master Form
                                   </button>
                                 </div>
+
                                 <div className="grid grid-cols-1 gap-2">
-                                  {itemVariants.length === 0 ? (
-                                    <div className="text-[11px] text-[#999] py-2">No variants created. The item acts as standard single variant.</div>
+                                  {variants.length === 0 ? (
+                                    <div className="text-[11px] text-[#999] py-2">No variants created. Open Edit to add selling units.</div>
                                   ) : (
-                                    itemVariants.map(v => {
-                                      const packageSize = v.packageSize || 1;
-                                      const wholeUnits = Math.floor((item.stockInBaseUnit || 0) / packageSize);
-                                      const remainder = Number(((item.stockInBaseUnit || 0) % packageSize).toFixed(2));
-                                      const isInactive = !v.isActive;
+                                    variants.map(v => {
+                                      const mult = v.multiplier || v.packageSize || 1;
+                                      const displayPackages = Math.floor((item.stockInBaseUnit || 0) / mult);
+                                      const remainder = Number(((item.stockInBaseUnit || 0) % mult).toFixed(2));
+                                      const autoPurchaseCost = Number((mult * unitCost).toFixed(2));
+
                                       return (
-                                        <div key={v.id} className={`bg-white border border-[#EDEDED] rounded-xl p-3 flex flex-col sm:flex-row justify-between sm:items-center gap-2 ${isInactive ? 'opacity-60 bg-gray-50' : ''}`}>
+                                        <div key={v.id} className="bg-white border border-[#EDEDED] rounded-xl p-3 flex flex-col sm:flex-row justify-between sm:items-center gap-2">
                                           <div>
                                             <div className="flex items-center gap-2">
                                               <span className="text-[13px] font-bold text-[#111111]">{v.name}</span>
-                                              {v.isDefault ? (
+                                              <span className="text-[11px] text-[#666] font-semibold">({mult} {stockUnit})</span>
+                                              {v.isDefault && (
                                                 <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 text-[8px] font-extrabold rounded-md uppercase tracking-wider">
-                                                  ✓ Default
+                                                  ✓ Default Selling Unit
                                                 </span>
-                                              ) : (
-                                                <button
-                                                  onClick={() => handlePromoteDefault(v)}
-                                                  className="px-1.5 py-0.5 bg-gray-100 text-gray-500 hover:bg-blue-50 hover:text-blue-600 text-[8px] font-extrabold rounded-md uppercase tracking-wider border border-gray-200 hover:border-blue-200 transition-colors"
-                                                  title="Promote to default variant"
-                                                >
-                                                  Set Default
-                                                </button>
                                               )}
-                                              {isInactive && (
-                                                <span className="px-1.5 py-0.5 bg-gray-200 text-gray-700 text-[8px] font-extrabold rounded-md uppercase tracking-wider">
-                                                  Inactive
+                                              {v.pricingMode === 'auto' && (
+                                                <span className="px-1.5 py-0.5 bg-green-100 text-green-700 text-[8px] font-extrabold rounded-md uppercase tracking-wider">
+                                                  Auto {v.profitMargin}% Margin
                                                 </span>
                                               )}
                                             </div>
                                             <div className="flex gap-3 text-[10px] font-mono text-[#777] mt-0.5">
-                                              <span>SKU: {v.sku}</span>
-                                              <span>1 {v.name} = {packageSize} {item.baseUnit}</span>
                                               {v.barcode && (
                                                 <button onClick={() => setBarcodeModalText(v.barcode)} className="flex items-center gap-0.5 hover:underline">
-                                                  <Barcode size={10} /> {v.barcode}
+                                                  <Barcode size={10} /> Barcode: {v.barcode}
                                                 </button>
                                               )}
                                             </div>
                                           </div>
-                                          <div className="flex flex-wrap gap-3 text-[12px]">
+
+                                          <div className="flex flex-wrap gap-4 text-[12px]">
                                             <div>
-                                              <span className="text-[#888]">Buy:</span> <span className="font-extrabold text-[#111]">₹{formatCurrency(v.purchasePrice)}</span>
+                                              <span className="text-[#888]">Purchase Cost:</span> <span className="font-bold text-[#555]">₹{formatCurrency(autoPurchaseCost)}</span>
                                             </div>
                                             <div>
-                                              <span className="text-[#888]">Sell:</span> <span className="font-extrabold text-[#111]">₹{formatCurrency(v.sellingPrice)}</span>
+                                              <span className="text-[#888]">Selling Price:</span> <span className="font-extrabold text-[#111]">₹{formatCurrency(v.sellingPrice)}</span>
                                             </div>
-                                            <div>
-                                              <span className="text-[#888]">Available:</span>
-                                              <span className="font-extrabold text-blue-600 ml-1">
-                                                {wholeUnits} {v.name}{remainder > 0 ? ` + ${remainder} ${item.baseUnit}` : ''}
+                                            <div className="bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-100">
+                                              <span className="text-blue-600 font-medium text-[11px]">Calculated Stock:</span>
+                                              <span className="font-extrabold text-blue-700 ml-1">
+                                                {displayPackages} {v.name}{remainder > 0 ? ` (+ ${remainder} ${stockUnit})` : ''}
                                               </span>
                                             </div>
-                                          </div>
-                                          <div className="flex items-center gap-1.5 self-end sm:self-auto">
-                                            <button
-                                              onClick={() => handleOpenEditVariant(v)}
-                                              className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg"
-                                            >
-                                              <Edit3 size={12} />
-                                            </button>
-                                            <button
-                                              onClick={() => handleDeleteVariant(v)}
-                                              className={`p-1.5 rounded-lg ${
-                                                v.isDefault
-                                                  ? 'text-gray-300 cursor-not-allowed'
-                                                  : 'text-red-500 hover:bg-red-50'
-                                              }`}
-                                              title={v.isDefault ? 'Promote another variant to default before deleting' : 'Delete variant'}
-                                            >
-                                              <Trash2 size={12} />
-                                            </button>
                                           </div>
                                         </div>
                                       );
@@ -717,475 +805,531 @@ export default function ItemMasterPage() {
         </div>
       </div>
 
-      {/* 4. Add/Edit Item Modal */}
+      {/* 4. 3-Tier ERP Product & Unit Master Modal */}
       {isItemModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-          <motion.div 
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 overflow-y-auto">
+          <motion.div
             initial={{ scale: 0.95, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            className="bg-white rounded-3xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 space-y-4 shadow-xl border border-[#ECECEC]"
+            className="bg-white rounded-3xl w-full max-w-5xl max-h-[90vh] flex flex-col shadow-2xl border border-[#ECECEC] overflow-hidden my-auto"
           >
-            <div className="flex items-center justify-between border-b border-[#ECECEC] pb-3">
-              <h3 className="text-[16px] font-bold text-[#111111]">
-                {editingItem ? 'Edit Product Item' : 'Create Product Item'}
-              </h3>
-              <button onClick={() => setIsItemModalOpen(false)} className="p-1 hover:bg-gray-100 rounded-lg">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-[#ECECEC] px-6 py-4 shrink-0 bg-white z-10">
+              <div>
+                <h3 className="text-[17px] font-extrabold text-[#111111]">
+                  {editingItem ? 'Edit Product — ERP Unit Conversion & Pricing Master' : 'Create Product — ERP Unit Conversion & Pricing Master'}
+                </h3>
+                <p className="text-[12px] text-[#777]">
+                  Define Purchase Unit (e.g. 1 Bag contains 50 KG) and Selling Variants. Stock is always tracked in the Stock Unit.
+                </p>
+              </div>
+              <button onClick={() => setIsItemModalOpen(false)} className="p-1.5 hover:bg-gray-100 rounded-xl transition-colors">
                 <X size={18} />
               </button>
             </div>
 
-            <form onSubmit={handleSaveItem} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="text-[11px] font-bold text-[#777] uppercase tracking-wider mb-1 block">Item Name *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Cow Feed Gold"
-                  value={itemFormData.name}
-                  onChange={e => {
-                    setItemFormData(prev => ({ ...prev, name: e.target.value }));
-                    if (!editingItem) generateSkuAndBarcode(e.target.value);
-                  }}
-                  className="w-full px-4 py-2.5 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[13px] font-semibold text-[#111] outline-none focus:border-[#FF6B00]"
-                />
-              </div>
+            {/* Form wrapping body + footer */}
+            <form onSubmit={handleSaveItem} className="flex-1 flex flex-col min-h-0 overflow-hidden">
+              {/* Scrollable Form Content */}
+              <div className="flex-1 overflow-y-auto p-6 space-y-6">
 
-              <div>
-                <label className="text-[11px] font-bold text-[#777] uppercase tracking-wider mb-1 block">Category *</label>
-                <select
-                  required
-                  value={itemFormData.category}
-                  onChange={e => setItemFormData(prev => ({ ...prev, category: e.target.value }))}
-                  className="w-full px-4 py-2.5 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[13px] font-semibold text-[#555] outline-none"
-                >
-                  {categories.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </div>
+                {/* SECTION 1: BASIC INFORMATION */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between border-b border-[#F0F0F0] pb-2">
+                    <h4 className="text-[12px] font-extrabold text-[#FF6B00] uppercase tracking-wider flex items-center gap-1.5">
+                      <Box size={14} /> Basic Product Information
+                    </h4>
+                  </div>
 
-              <div>
-                <label className="text-[11px] font-bold text-[#777] uppercase tracking-wider mb-1 block">Brand *</label>
-                <select
-                  required
-                  value={itemFormData.brand}
-                  onChange={e => setItemFormData(prev => ({ ...prev, brand: e.target.value }))}
-                  className="w-full px-4 py-2.5 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[13px] font-semibold text-[#555] outline-none"
-                >
-                  {brands.map(b => <option key={b} value={b}>{b}</option>)}
-                </select>
-              </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="sm:col-span-1">
+                      <label className="text-[11px] font-bold text-[#777] uppercase tracking-wider mb-1 block">Product Name *</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. Cow Feed Gold"
+                        value={itemFormData.name}
+                        onChange={e => {
+                          setItemFormData(prev => ({ ...prev, name: e.target.value }));
+                          if (!editingItem) generateSkuAndBarcode(e.target.value);
+                        }}
+                        className="w-full px-4 py-2.5 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[13px] font-semibold text-[#111] outline-none focus:border-[#FF6B00]"
+                      />
+                    </div>
 
-              <div>
-                <label className="text-[11px] font-bold text-[#777] uppercase tracking-wider mb-1 block">Base Unit * <span className="text-[9px] font-normal text-[#AAAAAA] normal-case">(Stock is tracked in this unit)</span></label>
-                <select
-                  required
-                  value={itemFormData.baseUnit}
-                  onChange={e => setItemFormData(prev => ({ ...prev, baseUnit: e.target.value }))}
-                  className="w-full px-4 py-2.5 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[13px] font-semibold text-[#555] outline-none"
-                >
-                  {units.map(u => <option key={u} value={u}>{u}</option>)}
-                </select>
-              </div>
+                    <div>
+                      <label className="text-[11px] font-bold text-[#777] uppercase tracking-wider mb-1 block">Category *</label>
+                      <select
+                        required
+                        value={itemFormData.category}
+                        onChange={e => setItemFormData(prev => ({ ...prev, category: e.target.value }))}
+                        className="w-full px-4 py-2.5 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[13px] font-semibold text-[#555] outline-none"
+                      >
+                        {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
 
-              <div>
-                <label className="text-[11px] font-bold text-[#777] uppercase tracking-wider mb-1 block">SKU Code *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="SKU Code"
-                  value={itemFormData.sku}
-                  onChange={e => setItemFormData(prev => ({ ...prev, sku: e.target.value }))}
-                  className="w-full px-4 py-2.5 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[13px] font-semibold text-[#111] outline-none focus:border-[#FF6B00]"
-                />
-              </div>
+                    <div>
+                      <label className="text-[11px] font-bold text-[#777] uppercase tracking-wider mb-1 block">Brand *</label>
+                      <select
+                        required
+                        value={itemFormData.brand}
+                        onChange={e => setItemFormData(prev => ({ ...prev, brand: e.target.value }))}
+                        className="w-full px-4 py-2.5 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[13px] font-semibold text-[#555] outline-none"
+                      >
+                        {brands.map(b => <option key={b} value={b}>{b}</option>)}
+                      </select>
+                    </div>
 
-              <div>
-                <label className="text-[11px] font-bold text-[#777] uppercase tracking-wider mb-1 block">Barcode (Optional)</label>
-                <input
-                  type="text"
-                  placeholder="Barcode"
-                  value={itemFormData.barcode}
-                  onChange={e => setItemFormData(prev => ({ ...prev, barcode: e.target.value }))}
-                  className="w-full px-4 py-2.5 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[13px] font-semibold text-[#111] outline-none focus:border-[#FF6B00]"
-                />
-              </div>
+                    <div>
+                      <label className="text-[11px] font-bold text-[#777] uppercase tracking-wider mb-1 block">SKU Code *</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="SKU Code"
+                        value={itemFormData.sku}
+                        onChange={e => setItemFormData(prev => ({ ...prev, sku: e.target.value }))}
+                        className="w-full px-4 py-2.5 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[13px] font-semibold text-[#111] outline-none focus:border-[#FF6B00]"
+                      />
+                    </div>
 
-              {/* Pricing tip */}
-              <div className="sm:col-span-2 p-3 rounded-xl bg-blue-50 border border-blue-100 text-[11px] text-blue-700 font-semibold flex items-start gap-2">
-                <span className="text-blue-500 mt-0.5 shrink-0">ℹ</span>
-                <span>Prices are managed per variant. After saving this item, expand it in the table and add variants (e.g. 50 KG Bag, 25 KG Bag, Loose KG) with individual purchase and selling prices.</span>
-              </div>
+                    <div>
+                      <label className="text-[11px] font-bold text-[#777] uppercase tracking-wider mb-1 block">Barcode (Optional)</label>
+                      <input
+                        type="text"
+                        placeholder="Barcode"
+                        value={itemFormData.barcode}
+                        onChange={e => setItemFormData(prev => ({ ...prev, barcode: e.target.value }))}
+                        className="w-full px-4 py-2.5 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[13px] font-semibold text-[#111] outline-none focus:border-[#FF6B00]"
+                      />
+                    </div>
 
+                    <div>
+                      <label className="text-[11px] font-bold text-[#777] uppercase tracking-wider mb-1 block">GST Rate (%)</label>
+                      <input
+                        type="number"
+                        placeholder="0"
+                        value={itemFormData.gst || ''}
+                        onChange={e => setItemFormData(prev => ({ ...prev, gst: Number(e.target.value) }))}
+                        className="w-full px-4 py-2.5 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[13px] font-semibold text-[#111] outline-none focus:border-[#FF6B00]"
+                      />
+                    </div>
 
-              <div>
-                <label className="text-[11px] font-bold text-[#777] uppercase tracking-wider mb-1 block">GST Rate (%)</label>
-                <input
-                  type="number"
-                  placeholder="0"
-                  value={itemFormData.gst || ''}
-                  onChange={e => setItemFormData(prev => ({ ...prev, gst: Number(e.target.value) }))}
-                  className="w-full px-4 py-2.5 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[13px] font-semibold text-[#111] outline-none focus:border-[#FF6B00]"
-                />
-              </div>
+                    <div>
+                      <label className="text-[11px] font-bold text-[#777] uppercase tracking-wider mb-1 block">Status</label>
+                      <select
+                        value={itemFormData.status}
+                        onChange={e => setItemFormData(prev => ({ ...prev, status: e.target.value as ItemStatus }))}
+                        className="w-full px-4 py-2.5 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[13px] font-semibold text-[#555] outline-none"
+                      >
+                        <option value="active">Active</option>
+                        <option value="inactive">Inactive</option>
+                      </select>
+                    </div>
 
-              <div>
-                <label className="text-[11px] font-bold text-[#777] uppercase tracking-wider mb-1 block">Status</label>
-                <select
-                  value={itemFormData.status}
-                  onChange={e => setItemFormData(prev => ({ ...prev, status: e.target.value as ItemStatus }))}
-                  className="w-full px-4 py-2.5 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[13px] font-semibold text-[#555] outline-none"
-                >
-                  <option value="active">Active</option>
-                  <option value="inactive">Inactive</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="text-[11px] font-bold text-[#777] uppercase tracking-wider mb-1 block">Minimum Alert Stock</label>
-                <input
-                  type="number"
-                  placeholder="5"
-                  value={itemFormData.minimumStock || ''}
-                  onChange={e => setItemFormData(prev => ({ ...prev, minimumStock: Number(e.target.value) }))}
-                  className="w-full px-4 py-2.5 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[13px] font-semibold text-[#111] outline-none focus:border-[#FF6B00]"
-                />
-              </div>
-
-              <div>
-                <label className="text-[11px] font-bold text-[#777] uppercase tracking-wider mb-1 block">Maximum Stock Level</label>
-                <input
-                  type="number"
-                  placeholder="100"
-                  value={itemFormData.maximumStock || ''}
-                  onChange={e => setItemFormData(prev => ({ ...prev, maximumStock: Number(e.target.value) }))}
-                  className="w-full px-4 py-2.5 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[13px] font-semibold text-[#111] outline-none focus:border-[#FF6B00]"
-                />
-              </div>
-
-              <div className="sm:col-span-2">
-                <label className="text-[11px] font-bold text-[#777] uppercase tracking-wider mb-1 block">Description</label>
-                <textarea
-                  placeholder="Describe product..."
-                  value={itemFormData.description}
-                  onChange={e => setItemFormData(prev => ({ ...prev, description: e.target.value }))}
-                  rows={2}
-                  className="w-full px-4 py-2.5 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[13px] font-semibold text-[#111] outline-none focus:border-[#FF6B00]"
-                />
-              </div>
-
-              <div className="sm:col-span-2 flex justify-end gap-3 pt-3 border-t border-[#ECECEC] mt-4">
-                <button
-                  type="button"
-                  onClick={() => setIsItemModalOpen(false)}
-                  className="px-5 py-2.5 border border-[#ECECEC] rounded-xl text-[13px] font-bold hover:bg-gray-50 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 bg-[#111] text-white rounded-xl text-[13px] font-bold hover:bg-gray-800 transition-colors"
-                >
-                  Save Item
-                </button>
-              </div>
-            </form>
-          </motion.div>
-        </div>
-      )}
-
-      {/* 5. Add/Edit Variant Modal */}
-      {isVariantModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-          <motion.div
-            initial={{ scale: 0.95, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            className="bg-white rounded-3xl w-full max-w-md max-h-[90vh] flex flex-col shadow-xl border border-[#ECECEC]"
-          >
-            {/* Modal Header */}
-            <div className="flex items-center justify-between border-b border-[#ECECEC] px-6 py-4">
-              <h3 className="text-[16px] font-bold text-[#111111]">
-                {editingVariant ? 'Edit Variant' : 'Add New Variant'}
-              </h3>
-            </div>
-            {/* Scrollable Form Content */}
-            <form onSubmit={handleSaveVariant} className="flex-1 overflow-y-auto px-6 py-4 space-y-3.5">
-              <div>
-                <label className="text-[11px] font-bold text-[#777] uppercase tracking-wider mb-1 block">Variant Name *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Bag, Box, Loose"
-                  value={variantFormData.name}
-                  onChange={e => setVariantFormData(prev => ({ ...prev, name: e.target.value }))}
-                  className="w-full px-4 py-2 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[13px] font-semibold text-[#111] outline-none focus:border-[#FF6B00]"
-                />
-              </div>
-
-              {/* Package Size Row */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[11px] font-bold text-[#777] uppercase tracking-wider mb-1 block">
-                    Package Contains *
-                    {variantFormData.hasTransactions && (
-                      <span className="ml-1 text-[9px] font-extrabold text-orange-600 normal-case">LOCKED</span>
-                    )}
-                  </label>
-                  <input
-                    type="number"
-                    required
-                    min="1"
-                    placeholder="e.g. 50"
-                    disabled={variantFormData.hasTransactions}
-                    value={variantFormData.packageSize || ''}
-                    onChange={e => setVariantFormData(prev => ({ ...prev, packageSize: Number(e.target.value) || 1 }))}
-                    className={`w-full px-4 py-2 border rounded-xl text-[13px] font-semibold text-[#111] outline-none transition-colors ${
-                      variantFormData.hasTransactions
-                        ? 'bg-orange-50 border-orange-200 text-orange-700 cursor-not-allowed opacity-80'
-                        : 'bg-[#F7F7F7] border-[#ECECEC] focus:border-[#FF6B00]'
-                    }`}
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] font-bold text-[#777] uppercase tracking-wider mb-1 block">Base Unit</label>
-                  <input
-                    type="text"
-                    readOnly
-                    value={variantFormData.parentBaseUnit}
-                    className="w-full px-4 py-2 bg-gray-100 border border-[#ECECEC] rounded-xl text-[13px] font-semibold text-gray-500 outline-none select-none"
-                  />
-                </div>
-              </div>
-
-              {/* Transaction lock warning */}
-              {variantFormData.hasTransactions && (
-                <div className="flex items-start gap-2 bg-orange-50 border border-orange-200 rounded-2xl px-4 py-3">
-                  <span className="text-orange-500 text-[14px] mt-0.5 shrink-0">⚠</span>
-                  <div>
-                    <p className="text-[11px] font-extrabold text-orange-700">Package size is locked</p>
-                    <p className="text-[10px] text-orange-600 font-semibold mt-0.5">
-                      This variant has historical transactions. Changing the conversion ratio would corrupt past records.
-                      To change the package size, create a new variant instead.
-                    </p>
+                    <div className="sm:col-span-2">
+                      <label className="text-[11px] font-bold text-[#777] uppercase tracking-wider mb-1 block">Description</label>
+                      <input
+                        type="text"
+                        placeholder="Product notes or specifications..."
+                        value={itemFormData.description}
+                        onChange={e => setItemFormData(prev => ({ ...prev, description: e.target.value }))}
+                        className="w-full px-4 py-2.5 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[13px] font-semibold text-[#111] outline-none focus:border-[#FF6B00]"
+                      />
+                    </div>
                   </div>
                 </div>
-              )}
 
-              {/* Unit Conversion Preview */}
-              {variantFormData.packageSize > 0 && variantFormData.name && (
-                <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 space-y-1.5">
-                  <span className="text-[10px] font-extrabold text-amber-700 uppercase tracking-wider block">Unit Conversion Preview</span>
-                  {[1, 10, 20].map(multiplier => (
-                    <div key={multiplier} className="flex items-center justify-between text-[12px]">
-                      <span className="font-bold text-amber-900">
-                        {multiplier} {variantFormData.name}
-                      </span>
-                      <span className="text-amber-700 font-semibold">
-                        = {multiplier * variantFormData.packageSize} {variantFormData.parentBaseUnit}
+                {/* SECTION 2: STOCK SETTINGS */}
+                <div className="space-y-4 pt-2">
+                  <div className="flex items-center justify-between border-b border-[#F0F0F0] pb-2">
+                    <h4 className="text-[12px] font-extrabold text-[#111] uppercase tracking-wider flex items-center gap-1.5">
+                      <Layers size={14} className="text-[#FF6B00]" /> Stock Unit (Smallest Physical Inventory Unit)
+                    </h4>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                    <div>
+                      <label className="text-[11px] font-bold text-[#777] uppercase tracking-wider mb-1 block">
+                        Stock Unit * <span className="text-[9px] text-[#FF6B00] font-bold">(Smallest Unit e.g. KG)</span>
+                      </label>
+                      <select
+                        required
+                        value={itemFormData.stockUnit}
+                        onChange={e => handleStockUnitChange(e.target.value)}
+                        className="w-full px-4 py-2.5 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[13px] font-bold text-[#111] outline-none focus:border-[#FF6B00]"
+                      >
+                        {units.map(u => <option key={u} value={u}>{u}</option>)}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-[#777] uppercase tracking-wider mb-1 block">
+                        Initial Physical Stock ({itemFormData.stockUnit})
+                      </label>
+                      <input
+                        type="number"
+                        placeholder="0"
+                        value={itemFormData.stockInBaseUnit || ''}
+                        onChange={e => setItemFormData(prev => ({ ...prev, stockInBaseUnit: Number(e.target.value) }))}
+                        className="w-full px-4 py-2.5 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[13px] font-bold text-[#111] outline-none focus:border-[#FF6B00]"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-[#777] uppercase tracking-wider mb-1 block">Min Alert Stock ({itemFormData.stockUnit})</label>
+                      <input
+                        type="number"
+                        placeholder="5"
+                        value={itemFormData.minimumStock || ''}
+                        onChange={e => setItemFormData(prev => ({ ...prev, minimumStock: Number(e.target.value) }))}
+                        className="w-full px-4 py-2.5 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[13px] font-semibold text-[#111] outline-none focus:border-[#FF6B00]"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-[#777] uppercase tracking-wider mb-1 block">Max Stock Limit ({itemFormData.stockUnit})</label>
+                      <input
+                        type="number"
+                        placeholder="100"
+                        value={itemFormData.maximumStock || ''}
+                        onChange={e => setItemFormData(prev => ({ ...prev, maximumStock: Number(e.target.value) }))}
+                        className="w-full px-4 py-2.5 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[13px] font-semibold text-[#111] outline-none focus:border-[#FF6B00]"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* SECTION 3: PURCHASE SETTINGS */}
+                <div className="space-y-4 pt-2">
+                  <div className="flex items-center justify-between border-b border-[#F0F0F0] pb-2">
+                    <h4 className="text-[12px] font-extrabold text-[#111] uppercase tracking-wider flex items-center gap-1.5">
+                      <ShoppingBag size={14} className="text-[#FF6B00]" /> Purchase Settings (Single Entry)
+                    </h4>
+
+                    {/* READ-ONLY COST PER BASE UNIT BADGE */}
+                    <div className="bg-blue-50 border border-blue-200 text-blue-700 px-3.5 py-1.5 rounded-xl text-[12.5px] font-extrabold flex items-center gap-2" title="Read-only auto-calculated unit cost">
+                      <Lock size={12} className="text-blue-500" />
+                      <span>Cost per {itemFormData.stockUnit}:</span>
+                      <span className="text-blue-950 font-extrabold text-[14px]">
+                        ₹{itemFormData.purchasePrice && itemFormData.purchaseMultiplier ? (itemFormData.purchasePrice / itemFormData.purchaseMultiplier).toFixed(2) : '0.00'} / {itemFormData.stockUnit}
                       </span>
                     </div>
-                  ))}
-                </div>
-              )}
-
-
-              {/* Pricing Section with Auto-Calculated readOnly base unit prices */}
-              <div className="border border-[#F0F0F0] rounded-2xl p-3 bg-[#FAFAFA] space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-extrabold text-[#FF6B00] uppercase tracking-wider">Pricing Configuration</span>
-                </div>
-
-                {/* Column headers */}
-                <div className="grid grid-cols-2 gap-3">
-                  <span className="text-[9px] font-extrabold text-[#999] uppercase tracking-wider">Per {variantFormData.name || 'Variant'} (₹)</span>
-                  <span className="text-[9px] font-extrabold text-blue-400 uppercase tracking-wider">Per {variantFormData.parentBaseUnit} (₹)</span>
-                </div>
-
-                {/* Purchase Price Row */}
-                <div className="grid grid-cols-2 gap-3 items-center">
-                  <div>
-                    <label className="text-[9.5px] font-bold text-[#777] mb-0.5 block">Purchase Price *</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      required
-                      placeholder="0.00"
-                      value={variantFormData.purchasePrice || ''}
-                      onChange={e => {
-                        const p = Number(e.target.value);
-                        setVariantFormData(prev => ({ ...prev, purchasePrice: p }));
-                      }}
-                      className="w-full px-3.5 py-2 bg-white border border-[#ECECEC] rounded-xl text-[13px] font-semibold text-[#111] outline-none focus:border-[#FF6B00]"
-                    />
                   </div>
-                  <div>
-                    <label className="text-[9.5px] font-bold text-blue-500 mb-0.5 block">Calculated (auto)</label>
-                    <input
-                      type="number"
-                      readOnly
-                      placeholder="auto"
-                      value={variantFormData.packageSize > 0 && variantFormData.purchasePrice > 0
-                        ? Number((variantFormData.purchasePrice / variantFormData.packageSize).toFixed(4))
-                        : ''}
-                      className="w-full px-3.5 py-2 bg-gray-100 border border-gray-200 rounded-xl text-[13px] font-semibold text-gray-500 outline-none select-none"
-                    />
-                  </div>
-                </div>
 
-                {/* Selling Price Row */}
-                <div className="grid grid-cols-2 gap-3 items-center">
-                  <div>
-                    <label className="text-[9.5px] font-bold text-[#777] mb-0.5 block">Selling Price *</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      required
-                      placeholder="0.00"
-                      value={variantFormData.sellingPrice || ''}
-                      onChange={e => {
-                        const s = Number(e.target.value);
-                        setVariantFormData(prev => ({ ...prev, sellingPrice: s }));
-                      }}
-                      className="w-full px-3.5 py-2 bg-white border border-[#ECECEC] rounded-xl text-[13px] font-semibold text-[#111] outline-none focus:border-[#FF6B00]"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[9.5px] font-bold text-green-600 mb-0.5 block">Calculated (auto)</label>
-                    <input
-                      type="number"
-                      readOnly
-                      placeholder="auto"
-                      value={variantFormData.packageSize > 0 && variantFormData.sellingPrice > 0
-                        ? Number((variantFormData.sellingPrice / variantFormData.packageSize).toFixed(4))
-                        : ''}
-                      className="w-full px-3.5 py-2 bg-gray-100 border border-gray-200 rounded-xl text-[13px] font-semibold text-gray-500 outline-none select-none"
-                    />
-                  </div>
-                </div>
-
-                {/* Margin summary */}
-                {variantFormData.purchasePrice > 0 && variantFormData.sellingPrice > 0 && (
-                  <div className="flex items-center gap-4 pt-1.5 border-t border-[#EBEBEB]">
-                    <div className="flex items-center gap-1">
-                      <span className="text-[9.5px] text-[#999] font-semibold">Margin:</span>
-                      <span className={`text-[10.5px] font-extrabold ${
-                        variantFormData.sellingPrice >= variantFormData.purchasePrice ? 'text-green-600' : 'text-red-500'
-                      }`}>
-                        ₹{(variantFormData.sellingPrice - variantFormData.purchasePrice).toFixed(2)}
-                        {' '}({variantFormData.purchasePrice > 0
-                          ? (((variantFormData.sellingPrice - variantFormData.purchasePrice) / variantFormData.purchasePrice) * 100).toFixed(1)
-                          : 0}%)
-                      </span>
+                  <div className="bg-[#FAFBFD] border border-[#ECECEC] rounded-2xl p-4 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div>
+                      <label className="text-[11px] font-bold text-[#777] uppercase tracking-wider mb-1 block">Purchase Unit Name *</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. Bag, Box, Tin"
+                        value={itemFormData.defaultPurchaseUnit}
+                        onChange={e => setItemFormData(prev => ({ ...prev, defaultPurchaseUnit: e.target.value }))}
+                        className="w-full px-4 py-2.5 bg-white border border-[#ECECEC] rounded-xl text-[13px] font-bold text-[#111] outline-none focus:border-[#FF6B00]"
+                      />
                     </div>
-                    {variantFormData.packageSize > 0 && (
-                      <div className="flex items-center gap-1">
-                        <span className="text-[9.5px] text-[#999] font-semibold">Margin/{variantFormData.parentBaseUnit}:</span>
-                        <span className="text-[10.5px] font-extrabold text-purple-600">
-                          ₹{((variantFormData.sellingPrice - variantFormData.purchasePrice) / variantFormData.packageSize).toFixed(2)}
+
+                    <div>
+                      <label className="text-[11px] font-bold text-[#777] uppercase tracking-wider mb-1 block">
+                        Contains Quantity * <span className="text-[9.5px] text-[#FF6B00] font-bold">(1 {itemFormData.defaultPurchaseUnit || 'Bag'} contains)</span>
+                      </label>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="number"
+                          required
+                          min="0.01"
+                          step="any"
+                          placeholder="50"
+                          value={itemFormData.purchaseMultiplier || ''}
+                          onChange={e => {
+                            const mult = Number(e.target.value);
+                            setItemFormData(prev => ({ ...prev, purchaseMultiplier: mult }));
+                            updatePurchasePricing(itemFormData.purchasePrice, mult);
+                          }}
+                          className="w-full px-4 py-2.5 bg-white border border-[#ECECEC] rounded-xl text-[13px] font-extrabold text-[#111] outline-none focus:border-[#FF6B00]"
+                        />
+                        <span className="text-[12px] font-extrabold text-[#111] bg-gray-100 px-3 py-2 rounded-xl border border-gray-200 shrink-0">
+                          {itemFormData.stockUnit}
                         </span>
                       </div>
-                    )}
+                      <div className="text-[11px] font-bold text-[#FF6B00] mt-1 flex items-center gap-1">
+                        <span>1 {itemFormData.defaultPurchaseUnit || 'Bag'} = {itemFormData.purchaseMultiplier || 0} {itemFormData.stockUnit}</span>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-[#777] uppercase tracking-wider mb-1 block">
+                        Purchase Price per {itemFormData.defaultPurchaseUnit || 'Bag'} (₹) *
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        required
+                        placeholder="2600.00"
+                        value={itemFormData.purchasePrice || ''}
+                        onChange={e => {
+                          const p = Number(e.target.value);
+                          setItemFormData(prev => ({ ...prev, purchasePrice: p }));
+                          updatePurchasePricing(p, itemFormData.purchaseMultiplier);
+                        }}
+                        className="w-full px-4 py-2.5 bg-white border border-[#ECECEC] rounded-xl text-[13.5px] font-extrabold text-[#111] outline-none focus:border-[#FF6B00]"
+                      />
+                    </div>
                   </div>
-                )}
+                </div>
+
+                {/* SECTION 4: SELLING VARIANTS GRID */}
+                <div className="space-y-3 pt-2">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#F0F0F0] pb-3">
+                    <div>
+                      <h4 className="text-[13px] font-extrabold text-[#111] uppercase tracking-wider flex items-center gap-2">
+                        <Layers size={16} className="text-[#FF6B00]" /> Selling Variants (Outward Selling Units)
+                      </h4>
+                      <p className="text-[11px] text-[#777] mt-0.5">
+                        Purchase Cost is read-only and automatically computed. Enter selling prices or set auto profit margins.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleApplyPresetVariants}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-50 hover:bg-orange-100 text-[#FF6B00] border border-orange-200 rounded-xl text-[11.5px] font-bold transition-colors"
+                      >
+                        <Sparkles size={13} /> Auto Presets ({itemFormData.stockUnit})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleAddVariantRow}
+                        className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#111] hover:bg-gray-800 text-white rounded-xl text-[11.5px] font-bold transition-colors"
+                      >
+                        <Plus size={14} /> Add Variant
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* EDITABLE VARIANT TABLE */}
+                  <div className="border border-[#ECECEC] rounded-2xl overflow-hidden shadow-sm bg-white">
+                    <div className="overflow-x-auto max-h-[280px]">
+                      <table className="w-full text-left border-collapse">
+                        <thead className="sticky top-0 bg-[#FAFAFA] border-b border-[#ECECEC] z-10">
+                          <tr>
+                            <th className="p-3 text-[10px] uppercase font-bold text-[#777] tracking-wider text-center w-14">Default</th>
+                            <th className="p-3 text-[10px] uppercase font-bold text-[#777] tracking-wider min-w-[150px]">Variant Name *</th>
+                            <th className="p-3 text-[10px] uppercase font-bold text-[#777] tracking-wider min-w-[130px]">
+                              Contains ({itemFormData.stockUnit}) *
+                            </th>
+                            <th className="p-3 text-[10px] uppercase font-bold text-[#777] tracking-wider min-w-[130px]">Purchase Cost (Auto)</th>
+                            <th className="p-3 text-[10px] uppercase font-bold text-[#777] tracking-wider min-w-[140px]">Pricing Mode</th>
+                            <th className="p-3 text-[10px] uppercase font-bold text-[#777] tracking-wider min-w-[130px]">Selling Price (₹)</th>
+                            <th className="p-3 text-[10px] uppercase font-bold text-[#777] tracking-wider min-w-[110px]">Barcode</th>
+                            <th className="p-3 text-[10px] uppercase font-bold text-[#777] tracking-wider text-center w-24">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[#F7F7F7]">
+                          {variantDrafts.length === 0 ? (
+                            <tr>
+                              <td colSpan={8} className="p-8 text-center text-[12px] text-[#999]">
+                                No selling variants added. Click <b>Auto Presets</b> or <b>Add Variant</b> above.
+                              </td>
+                            </tr>
+                          ) : (
+                            variantDrafts.map((row, idx) => {
+                              const mult = row.multiplier || row.packageSize || 1;
+                              const autoPurchaseCost = Number((mult * costPerStockUnit).toFixed(2));
+                              const isAuto = row.pricingMode === 'auto';
+
+                              return (
+                                <tr key={row.id || idx} className={`hover:bg-[#FAFBFD] transition-colors ${row.isDefault ? 'bg-blue-50/30' : ''}`}>
+                                  {/* Default Variant Radio */}
+                                  <td className="p-2.5 text-center">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSetDefaultVariant(idx)}
+                                      className={`w-6 h-6 mx-auto rounded-full border-2 flex items-center justify-center transition-all ${row.isDefault
+                                          ? 'border-[#FF6B00] bg-[#FF6B00] text-white shadow-sm'
+                                          : 'border-gray-300 bg-white text-transparent hover:border-gray-400'
+                                        }`}
+                                      title={row.isDefault ? 'Default Selling Unit' : 'Click to set as default selling unit'}
+                                    >
+                                      <Check size={12} strokeWidth={3} />
+                                    </button>
+                                  </td>
+
+                                  {/* Variant Name */}
+                                  <td className="p-2.5">
+                                    <input
+                                      type="text"
+                                      required
+                                      placeholder="e.g. 50 KG Bag"
+                                      value={row.name}
+                                      onChange={e => handleUpdateVariantRow(idx, 'name', e.target.value)}
+                                      className="w-full px-3 py-1.5 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[12.5px] font-semibold text-[#111] outline-none focus:border-[#FF6B00]"
+                                    />
+                                  </td>
+
+                                  {/* Multiplier / Contains (Stock Units) */}
+                                  <td className="p-2.5">
+                                    <div className="flex items-center gap-1">
+                                      <input
+                                        type="number"
+                                        required
+                                        min="0.0001"
+                                        step="any"
+                                        placeholder="1"
+                                        value={mult || ''}
+                                        onChange={e => handleUpdateVariantRow(idx, 'multiplier', Number(e.target.value))}
+                                        className="w-full px-3 py-1.5 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[12.5px] font-bold text-[#111] outline-none focus:border-[#FF6B00]"
+                                      />
+                                      <span className="text-[10.5px] font-bold text-[#777] shrink-0">{itemFormData.stockUnit}</span>
+                                    </div>
+                                  </td>
+
+                                  {/* Purchase Cost (Read-Only Auto Badge) */}
+                                  <td className="p-2.5">
+                                    <div className="px-3 py-1.5 bg-gray-100 border border-gray-200 rounded-xl text-[12.5px] font-bold text-gray-700 flex items-center justify-between" title="Read-only: auto-calculated from purchase price">
+                                      <span>₹{autoPurchaseCost}</span>
+                                      <Lock size={11} className="text-gray-400" />
+                                    </div>
+                                  </td>
+
+                                  {/* Pricing Mode & Margin */}
+                                  <td className="p-2.5">
+                                    <div className="flex items-center gap-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleUpdateVariantRow(idx, 'pricingMode', isAuto ? 'manual' : 'auto')}
+                                        className={`px-2 py-1 rounded-lg text-[10px] font-extrabold uppercase border transition-all ${isAuto
+                                            ? 'bg-green-100 text-green-700 border-green-300'
+                                            : 'bg-gray-100 text-gray-600 border-gray-300'
+                                          }`}
+                                      >
+                                        {isAuto ? 'Auto Margin' : 'Manual'}
+                                      </button>
+
+                                      {isAuto && (
+                                        <div className="flex items-center gap-0.5 w-16">
+                                          <input
+                                            type="number"
+                                            placeholder="20"
+                                            value={row.profitMargin || ''}
+                                            onChange={e => handleUpdateVariantRow(idx, 'profitMargin', Number(e.target.value))}
+                                            className="w-full px-1.5 py-1 bg-[#F7F7F7] border border-[#ECECEC] rounded-lg text-[11px] font-bold text-[#111] text-right outline-none focus:border-[#FF6B00]"
+                                          />
+                                          <Percent size={10} className="text-gray-500" />
+                                        </div>
+                                      )}
+                                    </div>
+                                  </td>
+
+                                  {/* Selling Price */}
+                                  <td className="p-2.5">
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      readOnly={isAuto}
+                                      placeholder="0.00"
+                                      value={row.sellingPrice || ''}
+                                      onChange={e => handleUpdateVariantRow(idx, 'sellingPrice', Number(e.target.value))}
+                                      className={`w-full px-3 py-1.5 border rounded-xl text-[12.5px] font-bold outline-none transition-colors ${isAuto
+                                          ? 'bg-green-50/50 border-green-200 text-green-800'
+                                          : 'bg-[#F7F7F7] border-[#ECECEC] text-[#111] focus:border-[#FF6B00]'
+                                        }`}
+                                    />
+                                  </td>
+
+                                  {/* Barcode */}
+                                  <td className="p-2.5">
+                                    <input
+                                      type="text"
+                                      placeholder="Barcode"
+                                      value={row.barcode}
+                                      onChange={e => handleUpdateVariantRow(idx, 'barcode', e.target.value)}
+                                      className="w-full px-3 py-1.5 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[12.5px] font-mono text-[#111] outline-none focus:border-[#FF6B00]"
+                                    />
+                                  </td>
+
+                                  {/* Actions */}
+                                  <td className="p-2.5 text-center">
+                                    <div className="flex items-center justify-center gap-1">
+                                      <button
+                                        type="button"
+                                        disabled={idx === 0}
+                                        onClick={() => handleReorderVariantRow(idx, 'up')}
+                                        title="Move Up"
+                                        className="p-1 text-gray-400 hover:text-gray-700 disabled:opacity-30"
+                                      >
+                                        <ArrowUp size={13} />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        disabled={idx === variantDrafts.length - 1}
+                                        onClick={() => handleReorderVariantRow(idx, 'down')}
+                                        title="Move Down"
+                                        className="p-1 text-gray-400 hover:text-gray-700 disabled:opacity-30"
+                                      >
+                                        <ArrowDown size={13} />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDuplicateVariantRow(idx)}
+                                        title="Duplicate Row"
+                                        className="p-1 text-blue-600 hover:bg-blue-50 rounded"
+                                      >
+                                        <Copy size={13} />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteVariantRow(idx)}
+                                        title="Delete Row"
+                                        className="p-1 text-red-500 hover:bg-red-50 rounded"
+                                      >
+                                        <Trash2 size={13} />
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+
               </div>
 
-              {/* SKU & Barcode */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[11px] font-bold text-[#777] uppercase tracking-wider mb-1 block">Variant SKU *</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="SKU"
-                    value={variantFormData.sku}
-                    onChange={e => setVariantFormData(prev => ({ ...prev, sku: e.target.value }))}
-                    className="w-full px-4 py-2 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[13px] font-semibold text-[#111] outline-none focus:border-[#FF6B00]"
-                  />
+              {/* PINNED MODAL FOOTER */}
+              <div className="flex items-center justify-between px-6 py-4 border-t border-[#ECECEC] shrink-0 bg-white z-10">
+                <div className="text-[11.5px] text-[#777] font-semibold">
+                  Total Selling Variants: <b className="text-[#111]">{variantDrafts.length}</b> | Default Selling Unit: <b className="text-[#FF6B00]">{variantDrafts.find(v => v.isDefault)?.name || 'None'}</b>
                 </div>
-                <div>
-                  <label className="text-[11px] font-bold text-[#777] uppercase tracking-wider mb-1 block">Barcode</label>
-                  <input
-                    type="text"
-                    placeholder="Barcode"
-                    value={variantFormData.barcode}
-                    onChange={e => setVariantFormData(prev => ({ ...prev, barcode: e.target.value }))}
-                    className="w-full px-4 py-2 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[13px] font-semibold text-[#111] outline-none focus:border-[#FF6B00]"
-                  />
-                </div>
-              </div>
 
-              {/* Opening Quantity — only shown when adding a new variant */}
-              {!editingVariant && (
-                <div>
-                  <label className="text-[11px] font-bold text-[#777] uppercase tracking-wider mb-1 block">
-                    Opening Quantity <span className="text-[9px] font-normal normal-case text-[#AAAAAA]">(New Variant Only)</span>
-                  </label>
-                  <input
-                    type="number"
-                    placeholder="0"
-                    min="0"
-                    value={variantFormData.openingQty || ''}
-                    onChange={e => setVariantFormData(prev => ({ ...prev, openingQty: Number(e.target.value) || 0 }))}
-                    className="w-full px-4 py-2 bg-[#F7F7F7] border border-[#ECECEC] rounded-xl text-[13px] font-semibold text-[#111] outline-none focus:border-[#FF6B00]"
-                  />
-                  {variantFormData.openingQty > 0 && variantFormData.packageSize > 0 && (
-                    <p className="text-[10px] text-blue-600 font-semibold mt-1">
-                      = {variantFormData.openingQty * variantFormData.packageSize} {variantFormData.parentBaseUnit} will be added to item stock
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {/* Status & Default Config */}
-              <div className="border border-[#F0F0F0] rounded-2xl p-3 bg-[#FAFAFA] space-y-2">
-                <span className="text-[10px] font-extrabold text-[#555] uppercase tracking-wider block">Status & Configuration</span>
                 <div className="flex gap-3">
                   <button
                     type="button"
-                    onClick={() => setVariantFormData(prev => ({ ...prev, isDefault: !prev.isDefault }))}
-                    className={`flex-1 py-2 rounded-xl text-[12px] font-extrabold border-2 transition-all flex items-center justify-center gap-2 ${
-                      variantFormData.isDefault
-                        ? 'bg-blue-50 border-blue-400 text-blue-700'
-                        : 'bg-white border-gray-200 text-gray-400'
-                    }`}
+                    onClick={() => setIsItemModalOpen(false)}
+                    className="px-5 py-2.5 border border-[#ECECEC] rounded-xl text-[13px] font-bold hover:bg-gray-50 transition-colors"
                   >
-                    Set Default
+                    Cancel
                   </button>
-
                   <button
-                    type="button"
-                    onClick={() => setVariantFormData(prev => ({ ...prev, isActive: !prev.isActive }))}
-                    className={`flex-1 py-2 rounded-xl text-[12px] font-extrabold border-2 transition-all flex items-center justify-center gap-2 ${
-                      variantFormData.isActive
-                        ? 'bg-green-50 border-green-400 text-green-700'
-                        : 'bg-white border-gray-200 text-gray-400'
-                    }`}
+                    type="submit"
+                    disabled={isSaving}
+                    className="px-6 py-2.5 bg-[#FF6B00] hover:bg-orange-600 text-white rounded-xl text-[13px] font-bold transition-all shadow-[0_4px_14px_rgba(255,107,0,0.35)] disabled:opacity-50"
                   >
-                    Active
-                </button>
-              </div>
-            </div>
-
-              {/* Modal Footer (Sticky inside form layout but scroll-relative) */}
-              <div className="flex justify-end gap-3 pt-3 border-t border-[#ECECEC] sticky bottom-0 bg-white">
-                <button
-                  type="button"
-                  onClick={() => setIsVariantModalOpen(false)}
-                  className="px-5 py-2 border border-[#ECECEC] rounded-xl text-[13px] font-bold hover:bg-gray-50 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 bg-[#111] text-white rounded-xl text-[13px] font-bold hover:bg-gray-800 transition-colors"
-                >
-                  Save Variant
-                </button>
+                    {isSaving ? 'Saving Product...' : editingItem ? 'Save Changes' : 'Create Product'}
+                  </button>
+                </div>
               </div>
             </form>
           </motion.div>
         </div>
       )}
 
-      {/* 6. Barcode Modal */}
+      {/* 5. Barcode Printable Modal */}
       {barcodeModalText && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
           <motion.div
@@ -1201,7 +1345,7 @@ export default function ItemMasterPage() {
             </div>
 
             <div className="bg-[#FAFAFA] border border-[#ECECEC] rounded-2xl p-6 flex flex-col items-center" id="printable-barcode-area">
-              <div 
+              <div
                 className="w-full flex items-center justify-center"
                 dangerouslySetInnerHTML={{ __html: generateBarcodeSVG(barcodeModalText, 60, 2) }}
               />

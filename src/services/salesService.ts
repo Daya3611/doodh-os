@@ -68,11 +68,11 @@ export const salesService = {
       const v = await offlineDb.inventoryVariants.get(item.variantId);
       const localItem = await offlineDb.inventoryItems.get(item.itemId);
       if (!v) throw new Error(`Variant not found for item ${item.itemName}`);
-      
+
       const packageSize = v.packageSize || item.packageSizeSnapshot || 1;
       const convertedQty = item.quantity * packageSize;
       const availableStock = localItem?.stockInBaseUnit || 0;
-      
+
       if (!enableNegativeStock && localItem && availableStock < convertedQty) {
         throw new Error(`Insufficient stock for ${item.itemName}. Available: ${availableStock} ${localItem.baseUnit}, Requested: ${convertedQty} ${localItem.baseUnit}`);
       }
@@ -97,7 +97,7 @@ export const salesService = {
         itemStocks[item.itemId] = localItem?.stockInBaseUnit || 0;
       }
       const localVariant = await offlineDb.inventoryVariants.get(item.variantId);
-      const packageSize = localVariant?.packageSize || item.packageSizeSnapshot || 1;
+      const packageSize = localVariant?.multiplier || localVariant?.packageSize || item.packageSizeSnapshot || 1;
       const convertedQty = item.quantity * packageSize;
       itemStocks[item.itemId] -= convertedQty;
     }
@@ -111,7 +111,7 @@ export const salesService = {
 
       if (localVariant && localItem) {
         const prevItemStock = localItem.stockInBaseUnit || 0;
-        const packageSize = localVariant.packageSize || item.packageSizeSnapshot || 1;
+        const packageSize = localVariant.multiplier || localVariant.packageSize || item.packageSizeSnapshot || 1;
         const convertedQty = item.quantity * packageSize;
         const finalItemStock = itemStocks[item.itemId];
 
@@ -150,10 +150,10 @@ export const salesService = {
     if (data.paymentMode === 'farmer_ledger' && data.farmerId) {
       const farmer = await offlineDb.farmers.get(data.farmerId);
       if (!farmer) throw new Error('Farmer not found');
-      
+
       const prevBalance = farmer.balance || 0;
       const newBalance = prevBalance - data.grandTotal; // Debit decreases balance
-      
+
       farmerUpdate = {
         farmerId: data.farmerId,
         prevBalance,
