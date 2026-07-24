@@ -311,4 +311,190 @@ export const collectionService = {
     const { balance } = calculateFarmerBalance(allFarmerLedger);
     await offlineDb.farmers.update(farmerId, { balance });
   },
+
+  /** Check if a collection entry already exists for Farmer + Date + Shift + AnimalType */
+  checkDuplicateCollection: async (
+    centerId: string,
+    farmerId: string,
+    dateStr: string, // YYYY-MM-DD
+    shift: 'morning' | 'evening',
+    animalType?: 'cow' | 'buffalo'
+  ): Promise<Collection | null> => {
+    if (!centerId || !farmerId || !dateStr || !shift) return null;
+
+    // Check Cloud if online
+    if (typeof window !== 'undefined' && navigator.onLine) {
+      try {
+        const q = query(
+          collectionService.getCollectionRef(centerId),
+          where('farmerId', '==', farmerId),
+          where('shift', '==', shift),
+          where('animalType', '==', animalType || 'cow')
+        );
+        const snapshot = await getDocs(q);
+        for (const d of snapshot.docs) {
+          const c = { id: d.id, ...d.data() } as Collection;
+          if (c.createdAt) {
+            const dt = (c.createdAt as any).toDate ? (c.createdAt as any).toDate() : new Date(c.createdAt as any);
+            const formatted = dt.toISOString().split('T')[0];
+            if (formatted === dateStr) {
+              return c;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Online duplicate check failed, using local cache:', err);
+      }
+    }
+
+    // Check local Dexie DB
+    const localCols = await offlineDb.collections
+      .where('centerId').equals(centerId)
+      .and(c => c.farmerId === farmerId && c.shift === shift && (!animalType || c.animalType === animalType) && c.isDeleted !== 1)
+      .toArray();
+
+    for (const c of localCols) {
+      if (c.createdAt) {
+        const dt = new Date(c.createdAt as any);
+        const formatted = dt.toISOString().split('T')[0];
+        if (formatted === dateStr) {
+          return c as Collection;
+        }
+      }
+    }
+
+    return null;
+  },
+
+  /** Override an existing collection atomically with audit logging */
+  overrideCollection: async (
+    centerId: string,
+    existingCollectionId: string,
+    newData: CollectionFormData,
+    userInfo: { userId: string; userName: string; userRole: string }
+  ): Promise<void> => {
+    const isOnline = typeof window !== 'undefined' && navigator.onLine;
+
+    if (isOnline) {
+      try {
+        await runTransaction(db, async (tx) => {
+          const colRef = doc(db, 'centers', centerId, 'collections', existingCollectionId);
+          const colSnap = await tx.get(colRef);
+          if (!colSnap.exists()) throw new Error('Collection document not found');
+
+          const oldData = colSnap.data() as Collection;
+          const oldAmount = oldData.totalAmount || 0;
+
+          // Update farmer balance differential
+          const farmerRef = doc(db, 'centers', centerId, 'farmers', newData.farmerId);
+          const farmerSnap = await tx.get(farmerRef);
+          if (!farmerSnap.exists()) throw new Error('Farmer document not found');
+
+          const currentBalance = farmerSnap.data().balance || 0;
+          const newBalance = currentBalance - oldAmount + newData.totalAmount;
+
+          // 1. Update Collection Document
+          tx.update(colRef, {
+            ...newData,
+            updatedBy: userInfo.userName,
+            updatedAt: serverTimestamp(),
+          });
+
+          // 2. Update Ledger Entry
+          const ledgerColRef = collection(db, 'centers', centerId, 'ledger');
+          const ledgerQuery = query(ledgerColRef, where('referenceId', '==', existingCollectionId));
+          const ledgerSnap = await getDocs(ledgerQuery);
+          
+          ledgerSnap.docs.forEach(lDoc => {
+            tx.update(lDoc.ref, {
+              credit: newData.totalAmount,
+              balance: newBalance,
+              updatedAt: serverTimestamp(),
+            });
+          });
+
+          // 3. Update Farmer Balance
+          tx.update(farmerRef, { balance: newBalance });
+        });
+
+        // Audit Log
+        const { auditService } = await import('@/services/auditService');
+        await auditService.log(centerId, {
+          action: 'OVERRIDE_COLLECTION',
+          collectionId: existingCollectionId,
+          farmerId: newData.farmerId,
+          farmerName: newData.farmerName,
+          newValues: newData,
+          userId: userInfo.userId,
+          userName: userInfo.userName,
+          userRole: userInfo.userRole,
+          reason: 'Collection override requested by authorized user',
+        });
+
+        await recalculateAndSyncFarmerBalance(centerId, newData.farmerId);
+        return;
+      } catch (err) {
+        console.warn('Online override collection failed, updating local DB:', err);
+      }
+    }
+
+    // Offline / Fallback local Dexie update
+    const existingLocal = await offlineDb.collections.get(existingCollectionId);
+    if (existingLocal) {
+      await offlineDb.collections.update(existingCollectionId, {
+        ...newData,
+        pendingSync: 1,
+        localUpdatedAt: Date.now(),
+      });
+
+      await recalculateAndSyncFarmerBalance(centerId, newData.farmerId);
+    }
+  },
+
+  /** Merge new collection quantities with an existing record */
+  mergeCollection: async (
+    centerId: string,
+    existing: Collection,
+    additionalLiters: number,
+    newFat: number,
+    newSnf: number,
+    newRate: number,
+    newTotalAmount: number,
+    userInfo: { userId: string; userName: string; userRole: string }
+  ): Promise<void> => {
+    const mergedLiters = existing.liters + additionalLiters;
+    const mergedTotal = existing.totalAmount + newTotalAmount;
+
+    const mergedData: CollectionFormData = {
+      farmerId: existing.farmerId,
+      farmerName: existing.farmerName,
+      animalType: existing.animalType,
+      shift: existing.shift,
+      liters: mergedLiters,
+      fat: newFat,
+      snf: newSnf,
+      clr: existing.clr,
+      rate: newRate,
+      totalAmount: mergedTotal,
+      enteredFat: newFat,
+      enteredSnf: newSnf,
+    };
+
+    await collectionService.overrideCollection(centerId, existing.id, mergedData, userInfo);
+
+    // Audit log specific for MERGE
+    const { auditService } = await import('@/services/auditService');
+    await auditService.log(centerId, {
+      action: 'MERGE_COLLECTION',
+      collectionId: existing.id,
+      farmerId: existing.farmerId,
+      farmerName: existing.farmerName,
+      previousValues: { liters: existing.liters, totalAmount: existing.totalAmount },
+      newValues: { mergedLiters, mergedTotal, additionalLiters },
+      userId: userInfo.userId,
+      userName: userInfo.userName,
+      userRole: userInfo.userRole,
+      reason: `Merged ${additionalLiters} L into existing ${existing.liters} L collection`,
+    });
+  },
 };
